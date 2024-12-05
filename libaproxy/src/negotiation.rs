@@ -30,17 +30,14 @@ pub enum NegotiationHash {
 /// attestation server.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum NegotiationKey {
-    RSA3072,
-    RSA4096,
-    ECP384,
-    ECP521,
+    Ecdh384Sha256Aes128,
 }
 
 /// A parameter that must be hashed into the negotiation hash.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum NegotiationParam {
-    /// Hash the public components of the TEE key.
-    TeeKeyPublicComponents,
+    /// Hash the EC public key's `Elliptic-Curve-Point-to-Octet-String` encoding.
+    EcPublicKeySec1Bytes,
     /// A base64-encoded byte array. This could represent a nonce or any other data the
     /// attestation server would like to embed in TEE evidence.
     Base64StdBytes(String),
