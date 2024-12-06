@@ -55,6 +55,8 @@ pub mod svsm_bin;
 // The kernel expects to access this crate as svsm, so reexport.
 #[cfg(all(test, test_in_svsm))]
 extern crate self as svsm;
+extern crate alloc;
+
 // Include a module containing the test runner.
 #[cfg(all(test, test_in_svsm))]
 pub mod testing;
