@@ -21,6 +21,10 @@ use alloc::{
     vec,
     vec::Vec,
 };
+use aes_gcm_siv::{
+    aead::{Aead, KeyInit},
+    Aes256GcmSiv, Nonce
+};
 use base64::prelude::*;
 use kbs_types::Tee;
 use libaproxy::*;
@@ -108,9 +112,11 @@ impl AttestationDriver<'_> {
             return Err(AttestationError::Failed);
         }
 
+        let aes_key = response.aes_key.ok_or(AttestationError::SecretNotFound)?;
+        let nonce = response.nonce.ok_or(AttestationError::SecretNotFound)?;
         let secret = response.secret.ok_or(AttestationError::SecretNotFound)?;
 
-        self.secret_decrypt(secret)
+        self.secret_decrypt(aes_key, nonce, secret)
     }
 
     /// Generate the TEE attestation key.
@@ -210,16 +216,32 @@ impl AttestationDriver<'_> {
     }
 
     /// Decrypt a secret from the attestation server with the TEE private key.
-    fn secret_decrypt(&self, encrypted: String) -> Result<Vec<u8>, AttestationError> {
+    fn secret_decrypt(&self, aes_key:String, nonce:String, encrypted: String) -> Result<Vec<u8>, AttestationError> {
+
+        let aes_key_bytes = BASE64_STANDARD
+            .decode(aes_key.as_bytes())
+            .or(Err(AttestationError::SecretDecode))?;
+
+        let nonce_bytes = BASE64_STANDARD
+            .decode(nonce.as_bytes())
+            .or(Err(AttestationError::SecretDecode))?;
+
         let bytes = BASE64_STANDARD
             .decode(encrypted)
             .or(Err(AttestationError::SecretDecode))?;
 
         // Safe to unwrap.
-        match self.key.clone().unwrap() {
+        let decrypted_result = match self.key.clone().unwrap() {
             TeeKey::Rsa(rsa) => rsa
-                .decrypt(Pkcs1v15Encrypt, &bytes)
-                .or(Err(AttestationError::SecretDecryption)),
+                .decrypt(Pkcs1v15Encrypt, &aes_key_bytes)
+        };
+
+        let cipher = Aes256GcmSiv::new_from_slice(&decrypted_result.unwrap());
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        match cipher.unwrap().decrypt(nonce, bytes.as_ref()){
+         Ok(decrypted) => Ok(decrypted),
+            Err(_) => Err(AttestationError::SecretDecode)
         }
     }
 

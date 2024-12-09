@@ -107,6 +107,8 @@ impl AttestationProtocol for KbsProtocol {
         if http_resp.status() != StatusCode::OK {
             return Ok(AttestationResponse {
                 success: false,
+                aes_key: None,
+                nonce: None,
                 secret: None,
             });
         }
@@ -123,21 +125,27 @@ impl AttestationProtocol for KbsProtocol {
         if http_resp.status() != StatusCode::OK {
             return Ok(AttestationResponse {
                 success: false,
+                aes_key: None,
+                nonce: None,
                 secret: None,
             });
         }
 
+        let text = http_resp.text().unwrap();
+        let resp: Response = serde_json::from_str(&text).unwrap();
+        // Get encrypted aes key from "encrypted_key" member of KBS response.
+        let key = resp.encrypted_key;
+
+        // Get nonce from "iv" member of KBS response.
+         let nonce = resp.iv;
+
         // Get encrypted secret from "ciphertext" member of KBS response.
-        let secret = {
-            let text = http_resp.text().unwrap();
-
-            let resp: Response = serde_json::from_str(&text).unwrap();
-
-            resp.ciphertext
-        };
+        let secret = resp.ciphertext;
 
         Ok(AttestationResponse {
             success: true,
+            aes_key: Some(key),
+            nonce: Some(nonce),
             secret: Some(secret),
         })
     }

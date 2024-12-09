@@ -53,6 +53,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aes-gcm-siv"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae0784134ba9375416d469ec31e7c5f9fa94405049cf08c5ce5b4698be673e0d"
+dependencies = [
+ "aead",
+ "aes",
+ "cipher",
+ "ctr",
+ "polyval",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "anstream"
 version = "0.6.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2085,6 +2100,7 @@ name = "svsm"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "aes-gcm-siv",
  "base64",
  "bitfield-struct 0.6.2",
  "bitflags 2.6.0",
