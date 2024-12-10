@@ -105,7 +105,7 @@ fn proxy_write(stream: &mut UnixStream, buf: impl Serialize) -> anyhow::Result<(
     // FIXME: SVSM isn't able to read from the socket when the last write occurs and the thread is
     // cleaned up. Perhaps a part of thread cleanup is closing the socket somehow? Investigate
     // further to allow this to be removed.
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(Duration::from_millis(10000));
 
     Ok(())
 }
