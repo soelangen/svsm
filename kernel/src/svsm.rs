@@ -326,10 +326,12 @@ pub extern "C" fn svsm_main() {
         let secret = attest_driver.attest().unwrap();
 
         let msg = core::str::from_utf8(&secret).unwrap();
-        log::info!("Decrypted secret from attestation server: {}", msg);
+        log::info!("Decrypted vTPM state from attestation server: {:?}", msg);
+
+        #[cfg(all(feature = "vtpm", not(test)))]
+        vtpm_init(Some(secret)).expect("vTPM failed to initialize");
     }
-    #[cfg(all(feature = "vtpm", not(test)))]
-    vtpm_init().expect("vTPM failed to initialize");
+
 
     virt_log_usage();
 

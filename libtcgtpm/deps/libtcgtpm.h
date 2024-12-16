@@ -14,6 +14,8 @@ int  _plat__Signal_PowerOn(void);
 int  _plat__Signal_Reset(void);
 void _plat__NVDisable(int delete);
 int  _plat__NVEnable(void *platParameter);
+int _plat__NvMemoryWrite(unsigned int startOffset, unsigned int size,
+                         void* data);
 
 int  TPM_Manufacture(int firstTime);
 int  TPM_TearDown(void);
