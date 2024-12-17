@@ -37,11 +37,21 @@ use zerocopy::{FromBytes, IntoBytes};
 
 /// The attestation driver that communicates with the proxy via some communication channel (serial
 /// port, virtio-vsock, etc...).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AttestationDriver<'a> {
     sp: SerialPort<'a>,
     tee: Tee,
     key: Option<TeeKey>,
+}
+
+impl Default for AttestationDriver<'_> {
+    fn default() -> Self {
+        Self {
+            sp: SerialPort::new(&DEFAULT_IO_DRIVER, 0x3e8),
+            tee: Tee::Snp,
+            key: None,
+        }
+    }
 }
 
 impl TryFrom<Tee> for AttestationDriver<'_> {
