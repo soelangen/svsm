@@ -27,16 +27,19 @@ use crate::{
     types::PAGE_SIZE,
     vtpm::{TcgTpmSimulatorInterface, VtpmInterface, VtpmProtocolInterface},
 };
+use crate::attest::AttestationDriver;
 
-#[derive(Debug, Copy, Clone, Default)]
-pub struct TcgTpm {
+#[derive(Debug, Clone, Default)]
+pub struct TcgTpm<'a> {
     is_powered_on: bool,
+    attestation_driver: Option<AttestationDriver<'a>>,
 }
 
-impl TcgTpm {
-    pub const fn new() -> TcgTpm {
+impl TcgTpm<'_> {
+    pub const fn new<'a>() -> TcgTpm<'a> {
         TcgTpm {
             is_powered_on: false,
+            attestation_driver: None,
         }
     }
 
@@ -69,7 +72,7 @@ impl TcgTpm {
 
 const TPM_CMDS_SUPPORTED: &[TpmPlatformCommand] = &[TpmPlatformCommand::SendCommand];
 
-impl VtpmProtocolInterface for TcgTpm {
+impl VtpmProtocolInterface for TcgTpm<'_> {
     fn get_supported_commands(&self) -> &[TpmPlatformCommand] {
         TPM_CMDS_SUPPORTED
     }
@@ -77,7 +80,7 @@ impl VtpmProtocolInterface for TcgTpm {
 
 pub const TPM_BUFFER_MAX_SIZE: usize = PAGE_SIZE;
 
-impl TcgTpmSimulatorInterface for TcgTpm {
+impl TcgTpmSimulatorInterface for TcgTpm<'_> {
     fn send_tpm_command(
         &self,
         buffer: &mut [u8],
@@ -148,12 +151,12 @@ impl TcgTpmSimulatorInterface for TcgTpm {
     }
 }
 
-impl VtpmInterface for TcgTpm {
+impl VtpmInterface for TcgTpm<'_> {
     fn is_powered_on(&self) -> bool {
         self.is_powered_on
     }
 
-    fn init(&mut self, nv_state: Option<Vec<u8>>) -> Result<(), SvsmReqError> {
+    fn init(&mut self) -> Result<(), SvsmReqError> {
         // Initialize the TPM TCG following the same steps done in the Simulator:
         //
         // 1. Manufacture it for the first time
@@ -163,8 +166,24 @@ impl VtpmInterface for TcgTpm {
         // 5. Power it on indicating it requires startup. By default, OVMF will start
         //    and selftest it.
 
+        self.attestation_driver = Option::from(AttestationDriver::try_from(kbs_types::Tee::Snp)?);
+        let nv_state = self.attestation_driver.as_mut().unwrap().attest().unwrap();
+        log::info!("Decrypted vTPM state from attestation server: {:?}", nv_state);
+
         unsafe { _plat__NVEnable(VirtAddr::null().as_mut_ptr::<c_void>()) };
 
+        let rc = unsafe {
+            _plat__NvMemoryWrite(
+                0,
+                nv_state.len().try_into().unwrap(),
+                nv_state.as_ptr() as *mut c_void,
+            )
+        };
+        if rc != 1 {
+            unsafe { _plat__NVDisable(1) };
+            return Err(SvsmReqError::incomplete());
+        }
+/*
         match nv_state {
             Some(state) => {
                 let rc = unsafe {
@@ -198,6 +217,7 @@ impl VtpmInterface for TcgTpm {
                 }
             }
         }
+        */
 
         self.signal_poweron(false)?;
         self.signal_nvon()?;

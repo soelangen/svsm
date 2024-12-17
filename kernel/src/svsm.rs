@@ -452,13 +452,8 @@ pub extern "C" fn svsm_main() {
         prepare_fw_launch(fw_meta).expect("Failed to setup guest VMSA/CAA");
     }
 
-    let mut attest_driver = AttestationDriver::try_from(kbs_types::Tee::Snp).unwrap();
-    let secret = attest_driver.attest().unwrap();
-
-    log::info!("Decrypted vTPM state from attestation server: {:?}", secret);
-
     #[cfg(all(feature = "vtpm", not(test)))]
-    vtpm_init(Some(secret)).expect("vTPM failed to initialize");
+    vtpm_init().expect("vTPM failed to initialize");
 
     virt_log_usage();
 
