@@ -8,11 +8,23 @@
 use super::*;
 use anyhow::Context;
 use kbs_types::{Attestation, Challenge, Request, Response, Tee, TeePubKey};
+use serde::{Deserialize, Serialize};
 use reqwest::StatusCode;
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct KbsProtocol;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SyncRequest {
+    pub nonce: String,
+    pub secret: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SyncResponse {
+    pub success: bool,
+}
 
 impl AttestationProtocol for KbsProtocol {
     /// KBS servers usually want two components hashed into attestation evidence: the public
@@ -147,6 +159,39 @@ impl AttestationProtocol for KbsProtocol {
             aes_key: Some(key),
             nonce: Some(nonce),
             secret: Some(secret),
+        })
+    }
+
+    // TODO also use the /resource endpoint however with a post instead of get
+    // Do that according to spec --> Currently the syncback endpoint is sufficient for testing
+    // https://github.com/confidential-containers/trustee/blob/main/kbs/docs/kbs_attestation_protocol.md#resource-registration-experimental
+    fn syncback(
+        &self,
+        http: &HttpClient,
+        request: SyncBackRequest,
+    ) -> anyhow::Result<SyncBackResponse> {
+        let req = SyncRequest {
+            nonce: request.nonce,
+            secret: request.secret,
+        };
+
+        // Send secret to synback endpoint
+        let http_resp = http
+            .cli
+            .post(format!("{}/kbs/v0/syncback", http.url))
+            .json(&req)
+            .send()
+            .context("unable to POST to KBS /syncback endpoint")?;
+
+        let text = http_resp
+            .text()
+            .context("unable to convert KBS /syncback response to text")?;
+
+        let resp: SyncResponse =
+            serde_json::from_str(&text).context("unable to convert KBS /synback response to JSON")?;
+
+        Ok(SyncBackResponse {
+            success: resp.success,
         })
     }
 }

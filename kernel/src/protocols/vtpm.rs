@@ -119,7 +119,7 @@ impl TpmSendCommandRequest {
         // The buffer slice must be large enough to hold the TPM command response
         buffer.resize(SEND_COMMAND_RESP_OUTBUF_SIZE, 0);
 
-        let vtpm = vtpm_get_locked();
+        let mut vtpm = vtpm_get_locked();
         vtpm.send_tpm_command(buffer.as_mut_slice(), &mut length, self.locality)?;
 
         if length > buffer.len() {

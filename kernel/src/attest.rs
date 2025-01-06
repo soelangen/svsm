@@ -78,6 +78,11 @@ impl AttestationDriver<'_> {
         Ok(self.attestation(negotiation)?)
     }
 
+    /// Synback the received secret by communicating with the attestation proxy.
+    pub fn syncback(&mut self) -> Result<SyncBackResponse, SvsmError> {
+        Ok(self.sync()?)
+    }
+
     /// Send a negotiation request to the proxy. Proxy should reply with Negotiation parameters
     /// that should be included in attestation evidence (e.g. through SEV-SNP's REPORT_DATA
     /// mechanism).
@@ -90,6 +95,19 @@ impl AttestationDriver<'_> {
         self.write(request)?;
         let payload = self.read()?;
 
+        serde_json::from_slice(&payload).or(Err(AttestationError::NegotiationRespDeserialize))
+    }
+
+    fn sync(&mut self) -> Result<SyncBackResponse, AttestationError> {
+        let request = SyncBackRequest {
+            nonce: "1".to_string(),
+            secret: "1".to_string(),
+        };
+        
+        self.write(request)?;
+        let payload = self.read()?;
+        // TODO different error code return and check if we shoudl encrypt response?
+        // Likely yes but we currently do not interpret the response so IDC
         serde_json::from_slice(&payload).or(Err(AttestationError::NegotiationRespDeserialize))
     }
 
