@@ -148,10 +148,19 @@ impl TcgTpmSimulatorInterface for TcgTpm<'_> {
         };
 
         if rc == 1 {
-            // TODO Synback as NV has changed --> Read new value and syncback
-            // E.g.
+            let rc = unsafe {
+                _plat__NvMemoryRead(
+                    0,
+                    self.state_len.try_into().unwrap(),
+                    lc_state.as_ptr() as *mut c_void,
+                )
+            };
+            if rc != 1 {
+                unsafe { _plat__NVDisable(1) };
+                return Err(SvsmReqError::incomplete());
+            }
             log::info!("Detected change of NV memory.");
-            self.attestation_driver.as_mut().unwrap().syncback().expect("TODO: panic message");
+            self.attestation_driver.as_mut().unwrap().syncback(lc_state)?;
         } else if rc == 0 {
             // TODO nothing has to be done as NV has not changed
         } else {

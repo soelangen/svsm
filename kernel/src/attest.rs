@@ -28,7 +28,7 @@ use aes_gcm_siv::{
 use base64::prelude::*;
 use kbs_types::Tee;
 use libaproxy::*;
-use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+use rand_chacha::{rand_core::SeedableRng, rand_core::RngCore, ChaChaRng};
 use rdrand::RdSeed;
 use rsa::{traits::PublicKeyParts, Pkcs1v15Encrypt, RsaPrivateKey};
 use serde::Serialize;
@@ -42,6 +42,7 @@ pub struct AttestationDriver<'a> {
     sp: SerialPort<'a>,
     tee: Tee,
     key: Option<TeeKey>,
+    aes_key: Option<Vec<u8>>,
 }
 
 impl Default for AttestationDriver<'_> {
@@ -50,6 +51,7 @@ impl Default for AttestationDriver<'_> {
             sp: SerialPort::new(&DEFAULT_IO_DRIVER, 0x3e8),
             tee: Tee::Snp,
             key: None,
+            aes_key: None,
         }
     }
 }
@@ -66,7 +68,7 @@ impl TryFrom<Tee> for AttestationDriver<'_> {
             _ => return Err(AttestationError::UnsupportedTee.into()),
         }
 
-        Ok(Self { sp, tee, key: None })
+        Ok(Self { sp, tee, key: None, aes_key: None })
     }
 }
 
@@ -79,8 +81,8 @@ impl AttestationDriver<'_> {
     }
 
     /// Synback the received secret by communicating with the attestation proxy.
-    pub fn syncback(&mut self) -> Result<SyncBackResponse, SvsmError> {
-        Ok(self.sync()?)
+    pub fn syncback(&mut self, secret: Vec<u8>) -> Result<SyncBackResponse, SvsmError> {
+        Ok(self.sync(secret)?)
     }
 
     /// Send a negotiation request to the proxy. Proxy should reply with Negotiation parameters
@@ -98,10 +100,13 @@ impl AttestationDriver<'_> {
         serde_json::from_slice(&payload).or(Err(AttestationError::NegotiationRespDeserialize))
     }
 
-    fn sync(&mut self) -> Result<SyncBackResponse, AttestationError> {
+    fn sync(&mut self, secret:Vec<u8>) -> Result<SyncBackResponse, AttestationError> {
+
+        let resp = self.secret_encrypt(secret)?;
+
         let request = SyncBackRequest {
-            nonce: "1".to_string(),
-            secret: "1".to_string(),
+            nonce: resp.0,
+            secret: resp.1,
         };
         
         self.write(request)?;
@@ -244,7 +249,7 @@ impl AttestationDriver<'_> {
     }
 
     /// Decrypt a secret from the attestation server with the TEE private key.
-    fn secret_decrypt(&self, aes_key:String, nonce:String, encrypted: String) -> Result<Vec<u8>, AttestationError> {
+    fn secret_decrypt(&mut self, aes_key:String, nonce:String, encrypted: String) -> Result<Vec<u8>, AttestationError> {
 
         let aes_key_bytes = BASE64_STANDARD
             .decode(aes_key.as_bytes())
@@ -264,13 +269,31 @@ impl AttestationDriver<'_> {
                 .decrypt(Pkcs1v15Encrypt, &aes_key_bytes)
         };
 
-        let cipher = Aes256GcmSiv::new_from_slice(&decrypted_result.unwrap());
+        self.aes_key = Some(decrypted_result.unwrap());
+
+        let cipher = Aes256GcmSiv::new_from_slice(self.aes_key.as_ref().unwrap());
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         match cipher.unwrap().decrypt(nonce, bytes.as_ref()){
          Ok(decrypted) => Ok(decrypted),
             Err(_) => Err(AttestationError::SecretDecode)
         }
+    }
+
+    /// Encrypt a secret with the shared AES-Key and send it to the attestation server
+    fn secret_encrypt(&mut self, secret: Vec<u8>) -> Result<(String, String), AttestationError> {
+        let mut rdseed = RdSeed::new().or(Err(AttestationError::RdRandUsage))?;
+        let mut rng = ChaChaRng::from_rng(&mut rdseed).or(Err(AttestationError::TeeKeyGenerate))?;
+        let mut rand = vec![0u8; 12];
+        rng.fill_bytes(rand.as_mut_slice());
+
+        let cipher = Aes256GcmSiv::new_from_slice(self.aes_key.as_ref().unwrap());
+        let nonce = Nonce::from_slice(&rand);
+
+        let nonce_bytes = BASE64_STANDARD.encode(nonce.as_bytes());
+        let encrypted_secret = BASE64_STANDARD.encode(cipher.unwrap().encrypt(nonce, secret.as_slice()).unwrap());
+
+        Ok((nonce_bytes, encrypted_secret))
     }
 
     /// Read attestation data from the serial port.

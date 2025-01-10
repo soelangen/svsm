@@ -20,6 +20,7 @@ use std::{
 pub fn attest(stream: &mut UnixStream, http: &mut backend::HttpClient) -> anyhow::Result<()> {
     negotiation(stream, http)?;
     attestation(stream, http)?;
+    syncback(stream, http)?;
 
     Ok(())
 }
@@ -67,6 +68,27 @@ fn attestation(stream: &mut UnixStream, http: &backend::HttpClient) -> anyhow::R
     Ok(())
 }
 
+fn syncback(stream: &mut UnixStream, http: &backend::HttpClient) -> anyhow::Result<()> {
+    loop {
+        let request: SyncBackRequest = {
+            let payload = match proxy_read(stream) {
+                Ok(payload) => payload,
+                Err(e) => break,
+            };
+
+            serde_json::from_slice(&payload)
+                .context("unable to deserialize attestation request from JSON")?
+        };
+
+        // Attest the TEE evidence with the server.
+        let response: SyncBackResponse = http.syncback(request)?;
+
+        // Write the response from the attestation server to SVSM.
+        proxy_write(stream, response)?;
+    }
+
+    Ok(())
+}
 /// Read bytes from the UNIX socket connected to SVSM. With each write, SVSM first writes an 8-byte
 /// header indicating the length of the buffer. Once the length is read, the buffer can be read.
 fn proxy_read(stream: &mut UnixStream) -> anyhow::Result<Vec<u8>> {
