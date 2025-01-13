@@ -18,17 +18,17 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use libtcgtpm::bindings::{
     TPM_Manufacture, TPM_TearDown, _plat__LocalitySet, _plat__NVDisable, _plat__NVEnable,
-    _plat__NvMemoryWrite, _plat__NvMemoryRead, _plat__NvGetChangedStatus,
-    _plat__RunCommand, _plat__SetNvAvail, _plat__Signal_PowerOn, _plat__Signal_Reset,
+    _plat__NvGetChangedStatus, _plat__NvMemoryRead, _plat__NvMemoryWrite, _plat__RunCommand,
+    _plat__SetNvAvail, _plat__Signal_PowerOn, _plat__Signal_Reset,
 };
 
+use crate::attest::AttestationDriver;
 use crate::{
     address::VirtAddr,
     protocols::{errors::SvsmReqError, vtpm::TpmPlatformCommand},
     types::PAGE_SIZE,
     vtpm::{TcgTpmSimulatorInterface, VtpmInterface, VtpmProtocolInterface},
 };
-use crate::attest::AttestationDriver;
 
 #[derive(Debug, Clone, Default)]
 pub struct TcgTpm<'a> {
@@ -96,9 +96,9 @@ impl TcgTpmSimulatorInterface for TcgTpm<'_> {
         if *length > TPM_BUFFER_MAX_SIZE || *length > buffer.len() {
             return Err(SvsmReqError::invalid_parameter());
         }
-        
+
         let lc_state: Vec<u8> = vec![0; self.state_len];
-        
+
         let rc = unsafe {
             _plat__NvMemoryRead(
                 0,
@@ -160,7 +160,10 @@ impl TcgTpmSimulatorInterface for TcgTpm<'_> {
                 return Err(SvsmReqError::incomplete());
             }
             log::info!("Detected change of NV memory.");
-            self.attestation_driver.as_mut().unwrap().syncback(lc_state)?;
+            self.attestation_driver
+                .as_mut()
+                .unwrap()
+                .syncback(lc_state)?;
         } else if rc == 0 {
             // TODO nothing has to be done as NV has not changed
         } else {

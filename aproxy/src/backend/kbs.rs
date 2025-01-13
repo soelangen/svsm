@@ -8,8 +8,8 @@
 use super::*;
 use anyhow::Context;
 use kbs_types::{Attestation, Challenge, Request, Response, Tee, TeePubKey};
-use serde::{Deserialize, Serialize};
 use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -149,7 +149,7 @@ impl AttestationProtocol for KbsProtocol {
         let key = resp.encrypted_key;
 
         // Get nonce from "iv" member of KBS response.
-         let nonce = resp.iv;
+        let nonce = resp.iv;
 
         // Get encrypted secret from "ciphertext" member of KBS response.
         let secret = resp.ciphertext;
@@ -187,8 +187,8 @@ impl AttestationProtocol for KbsProtocol {
             .text()
             .context("unable to convert KBS /syncback response to text")?;
 
-        let resp: SyncResponse =
-            serde_json::from_str(&text).context("unable to convert KBS /synback response to JSON")?;
+        let resp: SyncResponse = serde_json::from_str(&text)
+            .context("unable to convert KBS /syncback response to JSON")?;
 
         Ok(SyncBackResponse {
             success: resp.success,

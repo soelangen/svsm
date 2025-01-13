@@ -5,7 +5,7 @@
 // Author: Sören Langenberg <soeren.langenberg@mailbox.org>
 
 extern crate alloc;
-use alloc::{string::String};
+use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 /// The synback request payload sent to the proxy from SVSM

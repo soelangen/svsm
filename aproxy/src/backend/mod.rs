@@ -47,7 +47,7 @@ impl HttpClient {
         }
     }
 
-    pub fn syncback(&self, req:SyncBackRequest) -> anyhow::Result<SyncBackResponse> {
+    pub fn syncback(&self, req: SyncBackRequest) -> anyhow::Result<SyncBackResponse> {
         match self.protocol {
             Protocol::Kbs(kbs) => kbs.syncback(self, req),
         }

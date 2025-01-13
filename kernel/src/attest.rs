@@ -16,19 +16,19 @@ use crate::{
     io::{Read, Write, DEFAULT_IO_DRIVER},
     serial::SerialPort,
 };
+use aes_gcm_siv::{
+    aead::{Aead, KeyInit},
+    Aes256GcmSiv, Nonce,
+};
 use alloc::{
     string::{String, ToString},
     vec,
     vec::Vec,
 };
-use aes_gcm_siv::{
-    aead::{Aead, KeyInit},
-    Aes256GcmSiv, Nonce
-};
 use base64::prelude::*;
 use kbs_types::Tee;
 use libaproxy::*;
-use rand_chacha::{rand_core::SeedableRng, rand_core::RngCore, ChaChaRng};
+use rand_chacha::{rand_core::RngCore, rand_core::SeedableRng, ChaChaRng};
 use rdrand::RdSeed;
 use rsa::{traits::PublicKeyParts, Pkcs1v15Encrypt, RsaPrivateKey};
 use serde::Serialize;
@@ -68,7 +68,12 @@ impl TryFrom<Tee> for AttestationDriver<'_> {
             _ => return Err(AttestationError::UnsupportedTee.into()),
         }
 
-        Ok(Self { sp, tee, key: None, aes_key: None })
+        Ok(Self {
+            sp,
+            tee,
+            key: None,
+            aes_key: None,
+        })
     }
 }
 
@@ -100,20 +105,15 @@ impl AttestationDriver<'_> {
         serde_json::from_slice(&payload).or(Err(AttestationError::NegotiationRespDeserialize))
     }
 
-    fn sync(&mut self, secret:Vec<u8>) -> Result<SyncBackResponse, AttestationError> {
+    fn sync(&mut self, secret: Vec<u8>) -> Result<SyncBackResponse, AttestationError> {
+        let (nonce, secret) = self.secret_encrypt(secret)?;
 
-        let resp = self.secret_encrypt(secret)?;
+        let request = SyncBackRequest { nonce, secret };
 
-        let request = SyncBackRequest {
-            nonce: resp.0,
-            secret: resp.1,
-        };
-        
         self.write(request)?;
         let payload = self.read()?;
-        // TODO different error code return and check if we shoudl encrypt response?
-        // Likely yes but we currently do not interpret the response so IDC
-        serde_json::from_slice(&payload).or(Err(AttestationError::NegotiationRespDeserialize))
+        // TODO Check if we should encrypt response --> We currently do not use the return value
+        serde_json::from_slice(&payload).or(Err(AttestationError::SyncBackRespDeserialize))
     }
 
     /// Send an attestation request to the proxy. Proxy should reply with attestation response
@@ -249,8 +249,12 @@ impl AttestationDriver<'_> {
     }
 
     /// Decrypt a secret from the attestation server with the TEE private key.
-    fn secret_decrypt(&mut self, aes_key:String, nonce:String, encrypted: String) -> Result<Vec<u8>, AttestationError> {
-
+    fn secret_decrypt(
+        &mut self,
+        aes_key: String,
+        nonce: String,
+        encrypted: String,
+    ) -> Result<Vec<u8>, AttestationError> {
         let aes_key_bytes = BASE64_STANDARD
             .decode(aes_key.as_bytes())
             .or(Err(AttestationError::SecretDecode))?;
@@ -265,8 +269,7 @@ impl AttestationDriver<'_> {
 
         // Safe to unwrap.
         let decrypted_result = match self.key.clone().unwrap() {
-            TeeKey::Rsa(rsa) => rsa
-                .decrypt(Pkcs1v15Encrypt, &aes_key_bytes)
+            TeeKey::Rsa(rsa) => rsa.decrypt(Pkcs1v15Encrypt, &aes_key_bytes),
         };
 
         self.aes_key = Some(decrypted_result.unwrap());
@@ -274,16 +277,16 @@ impl AttestationDriver<'_> {
         let cipher = Aes256GcmSiv::new_from_slice(self.aes_key.as_ref().unwrap());
         let nonce = Nonce::from_slice(&nonce_bytes);
 
-        match cipher.unwrap().decrypt(nonce, bytes.as_ref()){
-         Ok(decrypted) => Ok(decrypted),
-            Err(_) => Err(AttestationError::SecretDecode)
+        match cipher.unwrap().decrypt(nonce, bytes.as_ref()) {
+            Ok(decrypted) => Ok(decrypted),
+            Err(_) => Err(AttestationError::SecretDecode),
         }
     }
 
     /// Encrypt a secret with the shared AES-Key and send it to the attestation server
     fn secret_encrypt(&mut self, secret: Vec<u8>) -> Result<(String, String), AttestationError> {
         let mut rdseed = RdSeed::new().or(Err(AttestationError::RdRandUsage))?;
-        let mut rng = ChaChaRng::from_rng(&mut rdseed).or(Err(AttestationError::TeeKeyGenerate))?;
+        let mut rng = ChaChaRng::from_rng(&mut rdseed).or(Err(AttestationError::NonceGenerate))?;
         let mut rand = vec![0u8; 12];
         rng.fill_bytes(rand.as_mut_slice());
 
@@ -291,7 +294,8 @@ impl AttestationDriver<'_> {
         let nonce = Nonce::from_slice(&rand);
 
         let nonce_bytes = BASE64_STANDARD.encode(nonce.as_bytes());
-        let encrypted_secret = BASE64_STANDARD.encode(cipher.unwrap().encrypt(nonce, secret.as_slice()).unwrap());
+        let encrypted_secret =
+            BASE64_STANDARD.encode(cipher.unwrap().encrypt(nonce, secret.as_slice()).unwrap());
 
         Ok((nonce_bytes, encrypted_secret))
     }
@@ -390,6 +394,8 @@ pub enum AttestationError {
     JsonSerialize,
     // Unable to deserialize response from proxy into libaproxy::NegotiationResponse.
     NegotiationRespDeserialize,
+    // Unable to generate the AES nonce.
+    NonceGenerate,
     // Error while reading from proxy's transport channel.
     ProxyRead,
     // Error while writing to proxy's transport channel.
@@ -406,6 +412,8 @@ pub enum AttestationError {
     SnpGetReport,
     // Error parsing the SnpReportResponse from the SNP_GET_REPORT.
     SnpResponseParse,
+    // Unable to deserialize response from proxy into libaproxy::SyncBackResponse
+    SyncBackRespDeserialize,
     // Unable to generate the TEE key.
     TeeKeyGenerate,
     // Unsupported TEE architecture.
