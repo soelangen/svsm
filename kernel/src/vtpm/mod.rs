@@ -68,7 +68,7 @@ pub trait VtpmInterface: TcgTpmSimulatorInterface {
     fn init(&mut self) -> Result<(), SvsmReqError>;
 }
 
-static VTPM: SpinLock<Vtpm> = SpinLock::new(Vtpm::new());
+static VTPM: SpinLock<Vtpm<'_>> = SpinLock::new(Vtpm::new());
 
 /// Initialize the TPM by calling the init() implementation of the
 /// [`VtpmInterface`]
@@ -81,6 +81,6 @@ pub fn vtpm_init() -> Result<(), SvsmReqError> {
     Ok(())
 }
 
-pub fn vtpm_get_locked<'a>() -> LockGuard<'a, Vtpm> {
+pub fn vtpm_get_locked<'a>() -> LockGuard<'a, Vtpm<'static>> {
     VTPM.lock()
 }

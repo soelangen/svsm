@@ -22,7 +22,7 @@ use aes_gcm_siv::{
 };
 use alloc::{string::ToString, vec, vec::Vec};
 use base64::prelude::*;
-use core::{cmp::min, fmt};
+use core::fmt;
 use kbs_types::Tee;
 use libaproxy::*;
 use p384::{ecdh, NistP384, PublicKey};
@@ -34,10 +34,19 @@ use zerocopy::{FromBytes, IntoBytes};
 
 /// The attestation driver that communicates with the proxy via some communication channel (serial
 /// port, virtio-vsock, etc...).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AttestationDriver<'a> {
     sp: SerialPort<'a>,
     tee: Tee,
+}
+
+impl Default for AttestationDriver<'_> {
+    fn default() -> Self {
+        Self {
+            sp: SerialPort::new(&DEFAULT_IO_DRIVER, 0x3e8),
+            tee: Tee::Snp,
+        }
+    }
 }
 
 impl TryFrom<Tee> for AttestationDriver<'_> {
@@ -253,7 +262,8 @@ impl AttestationDriver<'_> {
         key: &TeeKey,
     ) -> Result<Vec<u8>, AttestationError> {
         let secret = resp.secret.ok_or(AttestationError::SecretMissing)?;
-        let nonce = Nonce::from_slice(resp.nonce.ok_or(AttestationError::NonceMissing).as_ref()?);
+        let nonce = resp.nonce.ok_or(AttestationError::NonceMissing)?;
+        let nonce = Nonce::from_slice(&nonce);
 
         match key {
             TeeKey::Ecdh384Sha256Aes128(ec) => {
