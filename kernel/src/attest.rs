@@ -16,8 +16,10 @@ use crate::{
     io::{Read, Write, DEFAULT_IO_DRIVER},
     serial::SerialPort,
 };
-use aes::{cipher::BlockDecrypt, Aes128};
-use aes_gcm::KeyInit;
+use aes_gcm_siv::{
+    aead::{Aead, KeyInit},
+    Aes256GcmSiv, Nonce,
+};
 use alloc::{string::ToString, vec, vec::Vec};
 use base64::prelude::*;
 use core::{cmp::min, fmt};
@@ -251,6 +253,7 @@ impl AttestationDriver<'_> {
         key: &TeeKey,
     ) -> Result<Vec<u8>, AttestationError> {
         let secret = resp.secret.ok_or(AttestationError::SecretMissing)?;
+        let nonce = Nonce::from_slice(resp.nonce.ok_or(AttestationError::NonceMissing).as_ref()?);
 
         match key {
             TeeKey::Ecdh384Sha256Aes128(ec) => {
@@ -263,30 +266,21 @@ impl AttestationDriver<'_> {
                     ec.diffie_hellman(&pub_key)
                 };
 
-                // Extract the HKDF bytes and use to build an AES-128 symmetric key.
+                // Extract the HKDF bytes and use to build an AES-256 symmetric key.
                 let mut sha_bytes = [0u8; 16];
                 let empty: [u8; 0] = [];
 
                 let hkdf = shared.extract::<Sha256>(None);
                 hkdf.expand(&empty, &mut sha_bytes)
                     .or(Err(AttestationError::SecretDecrypt))?;
-                let aes =
-                    Aes128::new_from_slice(&sha_bytes).or(Err(AttestationError::SecretDecrypt))?;
+                let aes = Aes256GcmSiv::new_from_slice(&sha_bytes)
+                    .or(Err(AttestationError::SecretDecrypt))?;
 
-                // Decrypt each 16-byte block of the ciphertext with the symmetric key.
-                let mut ptr = 0;
-                let len = secret.len();
-                let mut vec: Vec<u8> = Vec::new();
-                while ptr < len {
-                    let remain = min(16, len - ptr);
-                    let mut arr: [u8; 16] = [0u8; 16];
-                    arr[..remain].copy_from_slice(&secret[ptr..ptr + remain]);
-                    aes.decrypt_block((&mut arr).into());
-                    vec.append(&mut arr.to_vec());
-                    ptr += remain;
-                }
+                let decrypt = aes
+                    .decrypt(nonce, secret.as_ref())
+                    .or(Err(AttestationError::SecretDecrypt))?;
 
-                Ok(vec)
+                Ok(decrypt)
             }
         }
     }
@@ -358,6 +352,8 @@ pub enum AttestationError {
     NegotiationParamDecode,
     /// Error serializing the negotiation request to JSON bytes.
     NegotiationSerialize,
+    /// Attestation successful, but no nonce found.
+    NonceMissing,
     /// Error reading from the attestation proxy transport channel.
     ProxyRead,
     /// Error writing over the attestation proxy transport channel.

@@ -108,6 +108,7 @@ impl AttestationProtocol for KbsProtocol {
         // FIXME
         if http_resp.status() != StatusCode::OK {
             return Ok(AttestationResponse {
+                nonce: None,
                 success: false,
                 secret: None,
                 pub_key: None,
@@ -124,6 +125,7 @@ impl AttestationProtocol for KbsProtocol {
         // Unsuccessful attempt at retrieving secret.
         if http_resp.status() != StatusCode::OK {
             return Ok(AttestationResponse {
+                nonce: None,
                 success: false,
                 secret: None,
                 pub_key: None,
@@ -138,6 +140,7 @@ impl AttestationProtocol for KbsProtocol {
             .context("unable to convert KBS /resource response to KBS Response object")?;
 
         Ok(AttestationResponse {
+            nonce: Some(resp.iv),
             success: true,
             secret: Some(resp.ciphertext),
             pub_key: Some(resp.encrypted_key),

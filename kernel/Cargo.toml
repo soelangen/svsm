@@ -27,6 +27,7 @@ syscall.workspace = true
 
 aes = { workspace = true, optional = true }
 aes-gcm = { workspace = true, features = ["aes", "alloc"] }
+aes-gcm-siv = { workspace = true, features = ["aes", "alloc"] }
 base64 = { workspace = true, optional = true, features = ["alloc"] }
 bitfield-struct.workspace = true
 bitflags.workspace = true
