@@ -18,7 +18,8 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use libtcgtpm::bindings::{
     TPM_Manufacture, TPM_TearDown, _plat__LocalitySet, _plat__NVDisable, _plat__NVEnable,
-    _plat__RunCommand, _plat__SetNvAvail, _plat__Signal_PowerOn, _plat__Signal_Reset,
+    _plat__NvMemoryWrite, _plat__RunCommand, _plat__SetNvAvail, _plat__Signal_PowerOn,
+    _plat__Signal_Reset,
 };
 
 use crate::{
@@ -178,21 +179,36 @@ impl VtpmInterface for TcgTpm<'_> {
 
         unsafe { _plat__NVEnable(VirtAddr::null().as_mut_ptr::<c_void>(), 0) };
 
-        let mut rc = self.manufacture(1)?;
-        if rc != 0 {
-            unsafe { _plat__NVDisable(1 as *mut c_void, 0) };
-            return Err(SvsmReqError::incomplete());
-        }
-
-        rc = self.manufacture(0)?;
-        if rc != 1 {
-            return Err(SvsmReqError::incomplete());
-        }
-
-        self.teardown()?;
-        rc = self.manufacture(1)?;
-        if rc != 0 {
-            return Err(SvsmReqError::incomplete());
+        match nv_state {
+            Some(state) => {
+                let rc = unsafe {
+                    _plat__NvMemoryWrite(
+                        0,
+                        state.len().try_into().unwrap(),
+                        state.as_ptr() as *mut c_void,
+                    )
+                };
+                if rc != 1 {
+                    unsafe { _plat__NVDisable(1 as *mut c_void, 0) };
+                    return Err(SvsmReqError::incomplete());
+                }
+            }
+            None => {
+                let mut rc = self.manufacture(1)?;
+                if rc != 0 {
+                    unsafe { _plat__NVDisable(1 as *mut c_void, 0) };
+                    return Err(SvsmReqError::incomplete());
+                }
+                rc = self.manufacture(0)?;
+                if rc != 1 {
+                    return Err(SvsmReqError::incomplete());
+                }
+                self.teardown()?;
+                rc = self.manufacture(1)?;
+                if rc != 0 {
+                    return Err(SvsmReqError::incomplete());
+                }
+            }
         }
 
         self.signal_poweron(false)?;
