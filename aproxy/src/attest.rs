@@ -27,6 +27,7 @@ pub fn attest(stream: &mut UnixStream) -> anyhow::Result<()> {
 
     negotiation(stream, &http)?;
     attestation(stream, &http)?;
+    syncback(stream, http)?;
 
     Ok(())
 }
@@ -78,6 +79,29 @@ fn attestation(stream: &mut UnixStream, http: &Client) -> anyhow::Result<()> {
     // Write the response from the attestation server to SVSM.
     proxy_write(stream, response)?;
 
+    Ok(())
+}
+
+fn syncback(stream: &mut UnixStream, http: &Client) -> anyhow::Result<()> {
+    loop {
+        let request: SyncBackRequest = {
+            let payload = match proxy_read(stream) {
+                Ok(payload) => payload,
+                Err(e) => break,
+            };
+            serde_json::from_slice(&payload)
+                .context("unable to deserialize attestation request from JSON")?
+        };
+
+        let response = {
+            let backend = BACKEND.lock().unwrap();
+
+            backend.clone().unwrap().syncback(http, request)
+        }?;
+
+        // Write the response from the attestation server to SVSM.
+        proxy_write(stream, response)?;
+    }
     Ok(())
 }
 

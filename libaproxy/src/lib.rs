@@ -6,9 +6,12 @@
 // Author: Tyler Fanelli <tfanelli@redhat.com>
 
 #![no_std]
+extern crate alloc;
 
 mod attestation;
 mod negotiation;
+mod syncback;
 
 pub use attestation::*;
 pub use negotiation::*;
+pub use syncback::*;

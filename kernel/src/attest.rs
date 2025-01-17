@@ -26,6 +26,7 @@ use core::fmt;
 use kbs_types::Tee;
 use libaproxy::*;
 use p384::{ecdh, NistP384, PublicKey};
+use rand_chacha::rand_core::RngCore;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use rdrand::RdSeed;
 use serde::Serialize;
@@ -38,6 +39,7 @@ use zerocopy::{FromBytes, IntoBytes};
 pub struct AttestationDriver<'a> {
     sp: SerialPort<'a>,
     tee: Tee,
+    aes_key: Option<[u8; 16]>,
 }
 
 impl Default for AttestationDriver<'_> {
@@ -45,6 +47,7 @@ impl Default for AttestationDriver<'_> {
         Self {
             sp: SerialPort::new(&DEFAULT_IO_DRIVER, 0x3e8),
             tee: Tee::Snp,
+            aes_key: None,
         }
     }
 }
@@ -63,7 +66,11 @@ impl TryFrom<Tee> for AttestationDriver<'_> {
             _ => return Err(AttestationError::UnsupportedTee.into()),
         }
 
-        Ok(Self { sp, tee })
+        Ok(Self {
+            sp,
+            tee,
+            aes_key: None,
+        })
     }
 }
 
@@ -73,6 +80,11 @@ impl AttestationDriver<'_> {
         let negotiation = self.negotiation()?;
 
         Ok(self.attestation(negotiation)?)
+    }
+
+    /// Synback the received secret by communicating with the attestation proxy.
+    pub fn syncback(&mut self, secret: Vec<u8>) -> Result<SyncBackResponse, SvsmError> {
+        Ok(self.sync(secret)?)
     }
 
     /// Send a negotiation request to the proxy. Proxy should reply with Negotiation parameters
@@ -88,6 +100,17 @@ impl AttestationDriver<'_> {
         let payload = self.read()?;
 
         serde_json::from_slice(&payload).or(Err(AttestationError::NegotiationDeserialize))
+    }
+
+    fn sync(&mut self, secret: Vec<u8>) -> Result<SyncBackResponse, AttestationError> {
+        let (nonce, secret) = self.secret_encrypt(secret)?;
+
+        let request = SyncBackRequest { nonce, secret };
+
+        self.write(request)?;
+        let payload = self.read()?;
+        // TODO Check if we should encrypt response --> We currently do not use the return value
+        serde_json::from_slice(&payload).or(Err(AttestationError::SyncBackRespDeserialize))
     }
 
     /// Send an attestation request to the proxy. Proxy should reply with attestation response
@@ -257,7 +280,7 @@ impl AttestationDriver<'_> {
 
     /// Decrypt a secret from the attestation server with the TEE private key.
     fn secret_decrypt(
-        &self,
+        &mut self,
         resp: AttestationResponse,
         key: &TeeKey,
     ) -> Result<Vec<u8>, AttestationError> {
@@ -290,9 +313,27 @@ impl AttestationDriver<'_> {
                     .decrypt(nonce, secret.as_ref())
                     .or(Err(AttestationError::SecretDecrypt))?;
 
+                self.aes_key = Some(sha_bytes);
+
                 Ok(decrypt)
             }
         }
+    }
+
+    /// Encrypt a secret with the shared AES-Key and send it to the attestation server
+    fn secret_encrypt(&mut self, secret: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>), AttestationError> {
+        let mut rdseed = RdSeed::new().or(Err(AttestationError::NonceGenerate))?;
+        let mut rng = ChaChaRng::from_rng(&mut rdseed).or(Err(AttestationError::TeeKeyGenerate))?;
+
+        let mut rand = vec![0u8; 12];
+        rng.fill_bytes(rand.as_mut_slice());
+
+        let cipher = Aes256GcmSiv::new_from_slice(self.aes_key.as_ref().unwrap());
+        let nonce = Nonce::from_slice(&rand);
+
+        let encrypted_secret = cipher.unwrap().encrypt(nonce, secret.as_slice()).unwrap();
+
+        Ok((Vec::from(nonce.as_bytes()), encrypted_secret))
     }
 }
 
@@ -362,6 +403,8 @@ pub enum AttestationError {
     NegotiationParamDecode,
     /// Error serializing the negotiation request to JSON bytes.
     NegotiationSerialize,
+    // Unable to generate the AES nonce.
+    NonceGenerate,
     /// Attestation successful, but no nonce found.
     NonceMissing,
     /// Error reading from the attestation proxy transport channel.
@@ -374,6 +417,8 @@ pub enum AttestationError {
     SecretMissing,
     /// Error fetching the SEV-SNP attestation report.
     SnpGetReport,
+    /// Error deserializing the syncback response from JSON bytes.
+    SyncBackRespDeserialize,
     /// Error encoding the TEE public key to JSON.
     TeeKeyEncode,
     /// Error generating the TEE key.

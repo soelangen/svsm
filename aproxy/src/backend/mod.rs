@@ -11,6 +11,7 @@ use anyhow::anyhow;
 use lazy_static::lazy_static;
 use libaproxy::*;
 use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
 use std::{str::FromStr, sync::Mutex};
 
 lazy_static! {
@@ -23,6 +24,7 @@ pub struct ProtocolDispatcher {
     pub url: String,
     pub negotiation: fn(&Client, &str, NegotiationRequest) -> anyhow::Result<NegotiationResponse>,
     pub attestation: fn(&Client, &str, AttestationRequest) -> anyhow::Result<AttestationResponse>,
+    pub syncback: fn(&Client, &str, SyncBackRequest) -> anyhow::Result<SyncBackResponse>,
 }
 
 impl ProtocolDispatcher {
@@ -40,6 +42,10 @@ impl ProtocolDispatcher {
         a: AttestationRequest,
     ) -> anyhow::Result<AttestationResponse> {
         (self.attestation)(cli, &self.url, a)
+    }
+
+    pub fn syncback(&self, cli: &Client, s: SyncBackRequest) -> anyhow::Result<SyncBackResponse> {
+        (self.syncback(cli, &self.url, s))
     }
 }
 
@@ -73,4 +79,9 @@ pub trait AttestationProtocol {
         url: &str,
         req: AttestationRequest,
     ) -> anyhow::Result<AttestationResponse>;
+    fn syncback(
+        client: &Client,
+        url: &str,
+        req: SyncBackRequest,
+    ) -> anyhow::Result<SyncBackResponse>;
 }

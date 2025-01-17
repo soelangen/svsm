@@ -18,6 +18,15 @@ void _plat__NVDisable(void *platParameter, size_t paramSize);
 int  _plat__NVEnable(void *platParameter, size_t paramSize);
 int _plat__NvMemoryWrite(unsigned int startOffset, unsigned int size,
                          void* data);
+int  _plat__NvMemoryWrite(unsigned int startOffset,
+                          unsigned int size,
+                          void*        data);
+int  _plat__NvMemoryRead(unsigned int startOffset,
+                         unsigned int size,
+                         void*        data);
+int  _plat__NvGetChangedStatus(unsigned int startOffset,
+                               unsigned int size,
+                               void*        data);
 
 int  TPM_Manufacture(int firstTime);
 int  TPM_TearDown(void);

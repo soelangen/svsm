@@ -37,7 +37,7 @@ pub trait TcgTpmSimulatorInterface: VtpmProtocolInterface {
     ///             size of the TPM response received from the TPM.
     /// * `locality`: TPM locality the TPM command will be executed
     fn send_tpm_command(
-        &self,
+        &mut self,
         buffer: &mut [u8],
         length: &mut usize,
         locality: u8,
