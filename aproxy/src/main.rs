@@ -44,14 +44,19 @@ fn main() -> anyhow::Result<()> {
     let listener = UnixListener::bind(args.unix).context("unable to bind to UNIX socket")?;
 
     // Initialize HTTP socket for attestation server (with specific protocol).
-    let (negotiation, attestation) = match args.backend {
-        Protocol::Kbs => (KbsProtocol::negotiation, KbsProtocol::attestation),
+    let (negotiation, attestation, syncback) = match args.backend {
+        Protocol::Kbs => (
+            KbsProtocol::negotiation,
+            KbsProtocol::attestation,
+            KbsProtocol::syncback,
+        ),
     };
 
     let http = ProtocolDispatcher {
         url: args.url,
         attestation,
         negotiation,
+        syncback,
     };
 
     {

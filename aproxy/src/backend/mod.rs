@@ -45,7 +45,7 @@ impl ProtocolDispatcher {
     }
 
     pub fn syncback(&self, cli: &Client, s: SyncBackRequest) -> anyhow::Result<SyncBackResponse> {
-        (self.syncback(cli, &self.url, s))
+        (self.syncback)(cli, &self.url, s)
     }
 }
 

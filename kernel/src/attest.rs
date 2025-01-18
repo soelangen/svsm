@@ -39,7 +39,7 @@ use zerocopy::{FromBytes, IntoBytes};
 pub struct AttestationDriver<'a> {
     sp: SerialPort<'a>,
     tee: Tee,
-    aes_key: Option<[u8; 16]>,
+    aes_key: Option<[u8; 32]>,
 }
 
 impl Default for AttestationDriver<'_> {
@@ -300,7 +300,7 @@ impl AttestationDriver<'_> {
                 };
 
                 // Extract the HKDF bytes and use to build an AES-256 symmetric key.
-                let mut sha_bytes = [0u8; 16];
+                let mut sha_bytes = [0u8; 32];
                 let empty: [u8; 0] = [];
 
                 let hkdf = shared.extract::<Sha256>(None);

@@ -27,7 +27,7 @@ pub fn attest(stream: &mut UnixStream) -> anyhow::Result<()> {
 
     negotiation(stream, &http)?;
     attestation(stream, &http)?;
-    syncback(stream, http)?;
+    syncback(stream, &http)?;
 
     Ok(())
 }
@@ -87,7 +87,7 @@ fn syncback(stream: &mut UnixStream, http: &Client) -> anyhow::Result<()> {
         let request: SyncBackRequest = {
             let payload = match proxy_read(stream) {
                 Ok(payload) => payload,
-                Err(e) => break,
+                Err(_e) => break,
             };
             serde_json::from_slice(&payload)
                 .context("unable to deserialize attestation request from JSON")?

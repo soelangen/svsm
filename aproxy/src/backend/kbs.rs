@@ -16,8 +16,8 @@ pub struct KbsProtocol;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SyncRequest {
-    pub nonce: String,
-    pub secret: String,
+    pub nonce: Vec<u8>,
+    pub secret: Vec<u8>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SyncResponse {
@@ -171,7 +171,7 @@ impl AttestationProtocol for KbsProtocol {
         };
         // Send secret to synback endpoint
         let http_resp = cli
-            .post(format!("{}/kbs/v0/syncback", http.url))
+            .post(format!("{}/kbs/v0/syncback", url))
             .json(&req)
             .send()
             .context("unable to POST to KBS /syncback endpoint")?;
