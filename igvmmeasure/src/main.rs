@@ -59,11 +59,21 @@ fn main() -> Result<(), Box<dyn Error>> {
             output,
             id_key,
             author_key,
+            family_id,
+            image_id,
         } => {
             if options.platform != Platform::SevSnp {
                 return Err("Signing is only supported for SEV-SNP".into());
             }
-            sign_command(&output, &id_key, &author_key, &igvm, &measure)?;
+            sign_command(
+                &output,
+                &id_key,
+                &author_key,
+                &igvm,
+                &measure,
+                &family_id,
+                &image_id,
+            )?;
         }
     }
 
@@ -108,8 +118,10 @@ fn sign_command(
     author_key: &Option<String>,
     igvm: &IgvmFile,
     measure: &IgvmMeasure,
+    family_id: &Option<String>,
+    image_id: &Option<String>,
 ) -> Result<(), Box<dyn Error>> {
-    let id_block = SevIdBlockBuilder::build(igvm, measure)?;
+    let id_block = SevIdBlockBuilder::build(igvm, measure, family_id, image_id)?;
     let id_block_directive = id_block.sign(id_key, author_key)?;
 
     let mut directives = igvm.directives().to_vec();
