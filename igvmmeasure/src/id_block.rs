@@ -7,6 +7,7 @@
 use std::error::Error;
 use std::fs;
 
+use hex::FromHex;
 use igvm::{IgvmDirectiveHeader, IgvmFile};
 use igvm_defs::{
     IgvmPlatformType, IGVM_VHS_SNP_ID_BLOCK_PUBLIC_KEY, IGVM_VHS_SNP_ID_BLOCK_SIGNATURE,
@@ -39,7 +40,12 @@ pub struct SevIdBlockBuilder {
 }
 
 impl SevIdBlockBuilder {
-    pub fn build(igvm: &IgvmFile, measure: &IgvmMeasure) -> Result<Self, Box<dyn Error>> {
+    pub fn build(
+        igvm: &IgvmFile,
+        measure: &IgvmMeasure,
+        family_id: &Option<String>,
+        image_id: &Option<String>,
+    ) -> Result<Self, Box<dyn Error>> {
         let compatibility_mask = get_compatibility_mask(igvm, IgvmPlatformType::SEV_SNP).ok_or(
             String::from("IGVM file is not compatible with the specified platform."),
         )?;
@@ -49,12 +55,28 @@ impl SevIdBlockBuilder {
         let mut ld = [0u8; 48];
         ld.copy_from_slice(measure.digest());
 
+        let (family_id_bytes, image_id_bytes): ([u8; 16], [u8; 16]) = match (family_id, image_id) {
+            (Some(family_id), Some(image_id)) => (
+                <[u8; 16]>::try_from(Vec::from_hex(family_id).unwrap()).unwrap(),
+                <[u8; 16]>::try_from(Vec::from_hex(image_id).unwrap()).unwrap(),
+            ),
+            (Some(family_id), None) => (
+                <[u8; 16]>::try_from(Vec::from_hex(family_id).unwrap()).unwrap(),
+                Default::default(),
+            ),
+            (None, Some(image_id)) => (
+                Default::default(),
+                <[u8; 16]>::try_from(Vec::from_hex(image_id).unwrap()).unwrap(),
+            ),
+            (None, None) => (Default::default(), Default::default()),
+        };
+
         Ok(Self {
             compatibility_mask,
             id_block: SevIdBlock {
                 ld,
-                family_id: Default::default(),
-                image_id: Default::default(),
+                family_id: family_id_bytes,
+                image_id: image_id_bytes,
                 version: 1,
                 guest_svn: Default::default(),
                 policy,

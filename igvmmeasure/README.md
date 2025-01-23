@@ -106,7 +106,6 @@ The key that is used to sign the launch digest. The public portion of
 the key is stored in the IGVM file with the launch measurement and signature to
 allow the SEV-SNP platform to validate the expected measurement before checking
 the measurement matches that actual configuration of the guest.
-
 ### author-key
 The key that is used to sign the public id-key. This allows the SEV-SNP platform
 to check the validity of the public key that is used to verify the launch
@@ -124,4 +123,24 @@ Once the keys have been generated, the IGVM file can be signed:
 
 ```
 igvmmeasure igvm_file sign --output igvm_file_signed --id-key testkeys/id_key.pem --author-key testkeys/author_key.pem
+```
+
+Additionally, the VM can be assigned a unique id  through the usage of two ID parameters:
+
+### family-id
+The ID that is used to identify a family of VMs. The ID is stored within
+the ID Block and is uninterpreted by the platform.
+### image-id
+The ID that is used to identify a VM in a family of VMs. The ID is stored within
+the ID Block and is uninterpreted by the platform.
+
+Both the family-id and the image-id are a 16 byte long hexstring and can be generated using openssl:
+
+```
+openssl rand -hex 16
+```
+
+```
+igvmmeasure igvm_file sign --output igvm_file_signed --id-key testkeys/id_key.pem --author-key testkeys/author_key.pem \
+--family-id 00000000000000000000000000000001 --image-id 00000000000000000000000000000002
 ```

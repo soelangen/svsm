@@ -80,6 +80,14 @@ pub enum Commands {
         /// information.
         #[arg(long)]
         author_key: Option<String>,
+
+        /// String that contains the hex encoded Family ID of the guest
+        #[arg(long)]
+        family_id: Option<String>,
+
+        /// String that contains the hex encoded Image ID of the guest
+        #[arg(long)]
+        image_id: Option<String>,
     },
 }
 
