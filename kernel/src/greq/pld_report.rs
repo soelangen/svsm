@@ -134,9 +134,9 @@ pub struct AttestationReport {
     /// The guest policy
     policy: u64,
     /// The family ID provided at launch
-    family_id: [u8; 16],
+    pub family_id: [u8; 16],
     /// The image ID provided at launch
-    image_id: [u8; 16],
+    pub image_id: [u8; 16],
     /// The request VMPL for the attestation report
     vmpl: u32,
     /// The signature algorithm used to sign this report

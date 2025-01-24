@@ -15,6 +15,10 @@ pub struct SyncBackRequest {
     pub nonce: Vec<u8>,
     /// Secret encrypted with the AES key
     pub secret: Vec<u8>,
+    /// The family_id used for identification
+    pub family_id: [u8; 16],
+    /// The image_id used for identification
+    pub image_id: [u8; 16],
 }
 
 /// Response from proxy to SVSM indicating the status

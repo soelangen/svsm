@@ -18,10 +18,18 @@ pub struct KbsProtocol;
 pub struct SyncRequest {
     pub nonce: Vec<u8>,
     pub secret: Vec<u8>,
+    pub family_id: [u8; 16],
+    pub image_id: [u8; 16],
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SyncResponse {
     pub success: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResourceRequest {
+    pub family_id: [u8; 16],
+    pub image_id: [u8; 16],
 }
 
 impl AttestationProtocol for KbsProtocol {
@@ -125,10 +133,16 @@ impl AttestationProtocol for KbsProtocol {
             });
         }
 
+        let resource = ResourceRequest {
+            family_id: request.family_id,
+            image_id: request.image_id,
+        };
+
         // Successful attestation. Fetch the secret (which should be stored as "svsm_secret" within
         // the KBS's RVPS.
         let http_resp = cli
             .post(format!("{}/kbs/v0/svsm_secret", url))
+            .json(&resource)
             .send()
             .context("unable to POST to KBS /attest endpoint")?;
 
@@ -168,6 +182,8 @@ impl AttestationProtocol for KbsProtocol {
         let req = SyncRequest {
             nonce: request.nonce,
             secret: request.secret,
+            family_id: request.family_id,
+            image_id: request.image_id,
         };
         // Send secret to synback endpoint
         let http_resp = cli

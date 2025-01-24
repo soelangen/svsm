@@ -17,7 +17,7 @@ use crate::{
     serial::SerialPort,
 };
 use aes_gcm_siv::{
-    aead::{Aead, KeyInit},
+    aead::{Aead, KeyInit, Payload},
     Aes256GcmSiv, Nonce,
 };
 use alloc::{string::ToString, vec, vec::Vec};
@@ -40,6 +40,8 @@ pub struct AttestationDriver<'a> {
     sp: SerialPort<'a>,
     tee: Tee,
     aes_key: Option<[u8; 32]>,
+    family_id: [u8; 16],
+    image_id: [u8; 16],
 }
 
 impl Default for AttestationDriver<'_> {
@@ -48,6 +50,8 @@ impl Default for AttestationDriver<'_> {
             sp: SerialPort::new(&DEFAULT_IO_DRIVER, 0x3e8),
             tee: Tee::Snp,
             aes_key: None,
+            family_id: Default::default(),
+            image_id: Default::default(),
         }
     }
 }
@@ -70,6 +74,8 @@ impl TryFrom<Tee> for AttestationDriver<'_> {
             sp,
             tee,
             aes_key: None,
+            family_id: Default::default(),
+            image_id: Default::default(),
         })
     }
 }
@@ -105,7 +111,9 @@ impl AttestationDriver<'_> {
     fn sync(&mut self, secret: Vec<u8>) -> Result<SyncBackResponse, AttestationError> {
         let (nonce, secret) = self.secret_encrypt(secret)?;
 
-        let request = SyncBackRequest { nonce, secret };
+        let (family_id, image_id) = (self.family_id,self.image_id);
+
+        let request = SyncBackRequest { nonce, secret, family_id, image_id };
 
         self.write(request)?;
         let payload = self.read()?;
@@ -127,6 +135,8 @@ impl AttestationDriver<'_> {
         let request = AttestationRequest {
             evidence: BASE64_URL_SAFE.encode(evidence),
             key: AttestationKey::try_from(&key)?,
+            family_id: self.family_id,
+            image_id: self.image_id,
         };
 
         self.write(request)?;
@@ -191,7 +201,7 @@ impl AttestationDriver<'_> {
 
     /// Hash negotiation parameters and fetch TEE evidence.
     fn evidence(
-        &self,
+        &mut self,
         negotiation: NegotiationResponse,
         key: &TeeKey,
     ) -> Result<Vec<u8>, AttestationError> {
@@ -232,6 +242,9 @@ impl AttestationDriver<'_> {
                     // response (that is, &buf[0..len]).
                     let resp = SnpReportResponse::ref_from_bytes(&buf[..len])
                         .or(Err(AttestationError::SnpGetReport))?;
+
+                    self.family_id = resp.report().family_id;
+                    self.image_id = resp.report().image_id;
 
                     // Get the attestation report as bytes for serialization in the
                     // AttestationRequest.
@@ -331,7 +344,13 @@ impl AttestationDriver<'_> {
         let cipher = Aes256GcmSiv::new_from_slice(self.aes_key.as_ref().unwrap());
         let nonce = Nonce::from_slice(&rand);
 
-        let encrypted_secret = cipher.unwrap().encrypt(nonce, secret.as_slice()).unwrap();
+        let mut aad = [0u8; 32];
+        aad[..16].copy_from_slice(&self.family_id);
+        aad[16..].copy_from_slice(&self.image_id);
+
+        let payload = Payload { msg: secret.as_slice(), aad: aad.as_slice() };
+
+        let encrypted_secret = cipher.unwrap().encrypt(nonce, payload).unwrap();
 
         Ok((Vec::from(nonce.as_bytes()), encrypted_secret))
     }
