@@ -127,7 +127,7 @@ impl AttestationProtocol for KbsProtocol {
         //
         // FIXME
         if http_resp.status() != StatusCode::OK {
-            Ok(AttestationResponse { pub_key: None })
+            Ok(AttestationResponse { pubkey: None })
         } else {
             let text = http_resp
                 .text()
@@ -137,7 +137,7 @@ impl AttestationProtocol for KbsProtocol {
                 .context("unable to convert KBS /resource response to KBS Response object")?;
 
             Ok(AttestationResponse {
-                pub_key: resp.pub_key,
+                pubkey: resp.pubkey,
             })
         }
     }

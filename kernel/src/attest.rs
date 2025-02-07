@@ -146,18 +146,16 @@ impl AttestationDriver<'_> {
         let request = AttestationRequest {
             evidence: BASE64_URL_SAFE.encode(evidence),
             key: AttestationKey::try_from(&key)?,
-            family_id: self.family_id,
-            image_id: self.image_id,
         };
 
         self.write(request)?;
 
         let payload = self.read()?;
-        // Adjust to receive response with key
+
         let response: AttestationResponse =
             serde_json::from_slice(&payload).or(Err(AttestationError::AttestationDeserialize))?;
 
-        if response.pub_key.is_none() {
+        if response.pubkey.is_none() {
             return Err(AttestationError::Failed);
         }
 
@@ -331,7 +329,7 @@ impl AttestationDriver<'_> {
         match key {
             TeeKey::Ecdh384Sha256Aes128(ec) => {
                 let shared = {
-                    let s = resp.pub_key.ok_or(AttestationError::SecretDecrypt)?;
+                    let s = resp.pubkey.ok_or(AttestationError::SecretDecrypt)?;
                     let pub_key =
                         PublicKey::from_sec1_bytes(&s).or(Err(AttestationError::SecretDecrypt))?;
 
