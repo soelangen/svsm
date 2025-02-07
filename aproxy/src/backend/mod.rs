@@ -25,6 +25,7 @@ pub struct ProtocolDispatcher {
     pub negotiation: fn(&Client, &str, NegotiationRequest) -> anyhow::Result<NegotiationResponse>,
     pub attestation: fn(&Client, &str, AttestationRequest) -> anyhow::Result<AttestationResponse>,
     pub syncback: fn(&Client, &str, SyncBackRequest) -> anyhow::Result<SyncBackResponse>,
+    pub secret: fn(&Client, &str, SecretRequest) -> anyhow::Result<SecretResponse>,
 }
 
 impl ProtocolDispatcher {
@@ -46,6 +47,10 @@ impl ProtocolDispatcher {
 
     pub fn syncback(&self, cli: &Client, s: SyncBackRequest) -> anyhow::Result<SyncBackResponse> {
         (self.syncback)(cli, &self.url, s)
+    }
+
+    pub fn secret(&self, cli: &Client, s: SecretRequest) -> anyhow::Result<SecretResponse> {
+        (self.secret)(cli, &self.url, s)
     }
 }
 
@@ -79,6 +84,7 @@ pub trait AttestationProtocol {
         url: &str,
         req: AttestationRequest,
     ) -> anyhow::Result<AttestationResponse>;
+    fn secret(client: &Client, url: &str, req: SecretRequest) -> anyhow::Result<SecretResponse>;
     fn syncback(
         client: &Client,
         url: &str,

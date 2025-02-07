@@ -23,6 +23,10 @@ use aes_gcm_siv::{
 use alloc::{string::ToString, vec, vec::Vec};
 use base64::prelude::*;
 use core::fmt;
+use hmac::digest::consts::{B0, B1};
+use hmac::digest::core_api::{CoreWrapper, CtVariableCoreWrapper};
+use hmac::digest::typenum::{UInt, UTerm};
+use hmac::{HmacCore, Mac};
 use kbs_types::Tee;
 use libaproxy::*;
 use p384::{ecdh, NistP384, PublicKey};
@@ -30,7 +34,7 @@ use rand_chacha::rand_core::RngCore;
 use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
 use rdrand::RdSeed;
 use serde::Serialize;
-use sha2::{Digest, Sha256, Sha384, Sha512};
+use sha2::{Digest, OidSha256, OidSha512, Sha256, Sha256VarCore, Sha384, Sha512, Sha512VarCore};
 use zerocopy::{FromBytes, IntoBytes};
 
 /// The attestation driver that communicates with the proxy via some communication channel (serial
@@ -39,7 +43,7 @@ use zerocopy::{FromBytes, IntoBytes};
 pub struct AttestationDriver<'a> {
     sp: SerialPort<'a>,
     tee: Tee,
-    aes_key: Option<[u8; 32]>,
+    key: Option<[u8; 32]>,
     family_id: [u8; 16],
     image_id: [u8; 16],
 }
@@ -49,7 +53,7 @@ impl Default for AttestationDriver<'_> {
         Self {
             sp: SerialPort::new(&DEFAULT_IO_DRIVER, 0x3e8),
             tee: Tee::Snp,
-            aes_key: None,
+            key: None,
             family_id: Default::default(),
             image_id: Default::default(),
         }
@@ -73,7 +77,7 @@ impl TryFrom<Tee> for AttestationDriver<'_> {
         Ok(Self {
             sp,
             tee,
-            aes_key: None,
+            key: None,
             family_id: Default::default(),
             image_id: Default::default(),
         })
@@ -81,8 +85,13 @@ impl TryFrom<Tee> for AttestationDriver<'_> {
 }
 
 impl AttestationDriver<'_> {
+    pub fn get_secret(&mut self) -> Result<Vec<u8>, SvsmError> {
+        self.attest()?;
+        Ok(self.secret()?)
+    }
+
     /// Attest SVSM's launch state by communicating with the attestation proxy.
-    pub fn attest(&mut self) -> Result<Vec<u8>, SvsmError> {
+    fn attest(&mut self) -> Result<(), SvsmError> {
         let negotiation = self.negotiation()?;
 
         Ok(self.attestation(negotiation)?)
@@ -111,9 +120,14 @@ impl AttestationDriver<'_> {
     fn sync(&mut self, secret: Vec<u8>) -> Result<SyncBackResponse, AttestationError> {
         let (nonce, secret) = self.secret_encrypt(secret)?;
 
-        let (family_id, image_id) = (self.family_id,self.image_id);
+        let (family_id, image_id) = (self.family_id, self.image_id);
 
-        let request = SyncBackRequest { nonce, secret, family_id, image_id };
+        let request = SyncBackRequest {
+            nonce,
+            secret,
+            family_id,
+            image_id,
+        };
 
         self.write(request)?;
         let payload = self.read()?;
@@ -124,10 +138,7 @@ impl AttestationDriver<'_> {
     /// Send an attestation request to the proxy. Proxy should reply with attestation response
     /// containing the status (success/fail) and an optional secret returned from the server upon
     /// successful attestation.
-    fn attestation(
-        &mut self,
-        negotiation: NegotiationResponse,
-    ) -> Result<Vec<u8>, AttestationError> {
+    fn attestation(&mut self, negotiation: NegotiationResponse) -> Result<(), AttestationError> {
         // Generate TEE key and evidence for serialization to proxy.
         let key = self.tee_key_generate(&negotiation)?;
         let evidence = self.evidence(negotiation, &key)?;
@@ -142,14 +153,35 @@ impl AttestationDriver<'_> {
         self.write(request)?;
 
         let payload = self.read()?;
+        // Adjust to receive response with key
         let response: AttestationResponse =
             serde_json::from_slice(&payload).or(Err(AttestationError::AttestationDeserialize))?;
 
-        if !response.success {
+        if response.pub_key.is_none() {
             return Err(AttestationError::Failed);
         }
 
-        self.secret_decrypt(response, &key)
+        self.compute_shared_secret(response, &key)
+    }
+
+    fn secret(&mut self) -> Result<Vec<u8>, SvsmError> {
+        let mac = self.compute_mac(ResourceRequestHMAC::HmacSha256)?;
+
+        let request = SecretRequest {
+            family_id: self.family_id,
+            image_id: self.image_id,
+            algorithm: ResourceRequestHMAC::HmacSha256,
+            mac,
+        };
+
+        self.write(request)?;
+
+        let payload = self.read()?;
+
+        let response =
+            serde_json::from_slice(&payload).or(Err(AttestationError::SecretDeserialize))?;
+
+        Ok(self.secret_decrypt(response)?)
     }
 
     /// Read attestation data from the serial port.
@@ -291,19 +323,13 @@ impl AttestationDriver<'_> {
         Ok(sha.finalize().to_vec())
     }
 
-    /// Decrypt a secret from the attestation server with the TEE private key.
-    fn secret_decrypt(
+    fn compute_shared_secret(
         &mut self,
         resp: AttestationResponse,
         key: &TeeKey,
-    ) -> Result<Vec<u8>, AttestationError> {
-        let secret = resp.secret.ok_or(AttestationError::SecretMissing)?;
-        let nonce = resp.nonce.ok_or(AttestationError::NonceMissing)?;
-        let nonce = Nonce::from_slice(&nonce);
-
+    ) -> Result<(), AttestationError> {
         match key {
             TeeKey::Ecdh384Sha256Aes128(ec) => {
-                // Get the shared ECDH secret between the client/server EC keys.
                 let shared = {
                     let s = resp.pub_key.ok_or(AttestationError::SecretDecrypt)?;
                     let pub_key =
@@ -319,18 +345,69 @@ impl AttestationDriver<'_> {
                 let hkdf = shared.extract::<Sha256>(None);
                 hkdf.expand(&empty, &mut sha_bytes)
                     .or(Err(AttestationError::SecretDecrypt))?;
-                let aes = Aes256GcmSiv::new_from_slice(&sha_bytes)
-                    .or(Err(AttestationError::SecretDecrypt))?;
 
-                let decrypt = aes
-                    .decrypt(nonce, secret.as_ref())
-                    .or(Err(AttestationError::SecretDecrypt))?;
+                self.key = Some(sha_bytes);
 
-                self.aes_key = Some(sha_bytes);
-
-                Ok(decrypt)
+                Ok(())
             }
         }
+    }
+
+    fn compute_mac(&mut self, algorithm: ResourceRequestHMAC) -> Result<Vec<u8>, AttestationError> {
+        let mut input = [0u8; 32];
+        input[..16].copy_from_slice(&self.family_id);
+        input[16..].copy_from_slice(&self.image_id);
+        // Some conflicting types due to digest and mac
+        match algorithm {
+            ResourceRequestHMAC::HmacSha256 => {
+                let mut hmac = <CoreWrapper<
+                    HmacCore<
+                        CoreWrapper<
+                            CtVariableCoreWrapper<
+                                Sha256VarCore,
+                                UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>,
+                                OidSha256,
+                            >,
+                        >,
+                    >,
+                > as Mac>::new_from_slice(&self.key.unwrap())
+                .expect("HMAC is able to accept all key sizes");
+                hmac.update(&input);
+                Ok(hmac.finalize().into_bytes().to_vec())
+            }
+            ResourceRequestHMAC::HmacSha512 => {
+                let mut hmac = <CoreWrapper<
+                    HmacCore<
+                        CoreWrapper<
+                            CtVariableCoreWrapper<
+                                Sha512VarCore,
+                                UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>,
+                                OidSha512,
+                            >,
+                        >,
+                    >,
+                > as Mac>::new_from_slice(&self.key.unwrap())
+                .expect("HMAC is able to accept all key sizes");
+                hmac.update(&input);
+                Ok(hmac.finalize().into_bytes().to_vec())
+            }
+        }
+    }
+
+    /// Decrypt a secret from the attestation server with the TEE private key.
+    fn secret_decrypt(&mut self, resp: SecretResponse) -> Result<Vec<u8>, AttestationError> {
+        let secret = resp.secret.ok_or(AttestationError::SecretMissing)?;
+        let nonce = resp.nonce.ok_or(AttestationError::NonceMissing)?;
+        let nonce = Nonce::from_slice(&nonce);
+
+        let aes = Aes256GcmSiv::new_from_slice(&self.key.unwrap())
+            .or(Err(AttestationError::SecretDecrypt))?;
+
+        let decrypt = aes
+            .decrypt(nonce, secret.as_ref())
+            .or(Err(AttestationError::SecretDecrypt))?;
+
+        Ok(decrypt)
     }
 
     /// Encrypt a secret with the shared AES-Key and send it to the attestation server
@@ -341,14 +418,17 @@ impl AttestationDriver<'_> {
         let mut rand = vec![0u8; 12];
         rng.fill_bytes(rand.as_mut_slice());
 
-        let cipher = Aes256GcmSiv::new_from_slice(self.aes_key.as_ref().unwrap());
+        let cipher = Aes256GcmSiv::new_from_slice(self.key.as_ref().unwrap());
         let nonce = Nonce::from_slice(&rand);
 
         let mut aad = [0u8; 32];
         aad[..16].copy_from_slice(&self.family_id);
         aad[16..].copy_from_slice(&self.image_id);
 
-        let payload = Payload { msg: secret.as_slice(), aad: aad.as_slice() };
+        let payload = Payload {
+            msg: secret.as_slice(),
+            aad: aad.as_slice(),
+        };
 
         let encrypted_secret = cipher.unwrap().encrypt(nonce, payload).unwrap();
 
@@ -422,7 +502,7 @@ pub enum AttestationError {
     NegotiationParamDecode,
     /// Error serializing the negotiation request to JSON bytes.
     NegotiationSerialize,
-    // Unable to generate the AES nonce.
+    /// Unable to generate the AES nonce.
     NonceGenerate,
     /// Attestation successful, but no nonce found.
     NonceMissing,
@@ -432,6 +512,8 @@ pub enum AttestationError {
     ProxyWrite,
     /// Attestation successful, but unable to decrypt secret.
     SecretDecrypt,
+    /// Error deserializing the secret receive response from JSON bytes.
+    SecretDeserialize,
     /// Attestation successful, but no secret found.
     SecretMissing,
     /// Error fetching the SEV-SNP attestation report.

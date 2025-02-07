@@ -27,9 +27,11 @@ pub struct SyncResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ResourceRequest {
+pub struct SecretReceiveRequest {
     pub family_id: [u8; 16],
     pub image_id: [u8; 16],
+    pub algorithm: ResourceRequestHMAC,
+    pub mac: Vec<u8>,
 }
 
 impl AttestationProtocol for KbsProtocol {
@@ -125,21 +127,30 @@ impl AttestationProtocol for KbsProtocol {
         //
         // FIXME
         if http_resp.status() != StatusCode::OK {
-            return Ok(AttestationResponse {
-                nonce: None,
-                success: false,
-                secret: None,
-                pub_key: None,
-            });
-        }
+            Ok(AttestationResponse { pub_key: None })
+        } else {
+            let text = http_resp
+                .text()
+                .context("unable to read KBS /resource response")?;
 
-        let resource = ResourceRequest {
+            let resp: AttestationResponse = serde_json::from_str(&text)
+                .context("unable to convert KBS /resource response to KBS Response object")?;
+
+            Ok(AttestationResponse {
+                pub_key: resp.pub_key,
+            })
+        }
+    }
+
+    fn secret(cli: &Client, url: &str, request: SecretRequest) -> anyhow::Result<SecretResponse> {
+        let resource = SecretReceiveRequest {
             family_id: request.family_id,
             image_id: request.image_id,
+            algorithm: request.algorithm,
+            mac: request.mac,
         };
 
-        // Successful attestation. Fetch the secret (which should be stored as "svsm_secret" within
-        // the KBS's RVPS.
+        // Fetch the secret (which should be stored as "svsm_secret" within the KBS's RVPS.
         let http_resp = cli
             .post(format!("{}/kbs/v0/svsm_secret", url))
             .json(&resource)
@@ -148,7 +159,7 @@ impl AttestationProtocol for KbsProtocol {
 
         // Unsuccessful attempt at retrieving secret.
         if http_resp.status() != StatusCode::OK {
-            return Ok(AttestationResponse {
+            return Ok(SecretResponse {
                 nonce: None,
                 success: false,
                 secret: None,
@@ -163,7 +174,7 @@ impl AttestationProtocol for KbsProtocol {
         let resp: Response = serde_json::from_str(&text)
             .context("unable to convert KBS /resource response to KBS Response object")?;
 
-        Ok(AttestationResponse {
+        Ok(SecretResponse {
             nonce: Some(resp.iv),
             success: true,
             secret: Some(resp.ciphertext),

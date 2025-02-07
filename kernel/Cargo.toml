@@ -33,6 +33,7 @@ bitfield-struct.workspace = true
 bitflags.workspace = true
 gdbstub = { workspace = true, optional = true }
 gdbstub_arch = { workspace = true, optional = true }
+hmac.workspace = true
 igvm_defs = { workspace = true, features = ["unstable"] }
 intrusive-collections.workspace = true
 kbs-types = { workspace = true, optional = true, features = ["alloc"] }

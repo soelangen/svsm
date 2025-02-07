@@ -27,6 +27,7 @@ pub fn attest(stream: &mut UnixStream) -> anyhow::Result<()> {
 
     negotiation(stream, &http)?;
     attestation(stream, &http)?;
+    secret(stream, &http)?;
     syncback(stream, &http)?;
 
     Ok(())
@@ -60,8 +61,7 @@ fn negotiation(stream: &mut UnixStream, http: &Client) -> anyhow::Result<()> {
 }
 
 /// Attestation phase of SVSM attestation. SVSM will send an attestation request containing the TEE
-/// evidence. Proxy will respond with an attestation response containing the status
-/// (success/failure) and an optional secret upon successful attestation.
+/// evidence. Proxy will respond with an attestation response containing the public key of the server
 fn attestation(stream: &mut UnixStream, http: &Client) -> anyhow::Result<()> {
     let request: AttestationRequest = {
         let payload = proxy_read(stream)?;
@@ -77,6 +77,26 @@ fn attestation(stream: &mut UnixStream, http: &Client) -> anyhow::Result<()> {
     }?;
 
     // Write the response from the attestation server to SVSM.
+    proxy_write(stream, response)?;
+
+    Ok(())
+}
+
+/// Secret receive phase of SVSM attestation. SVSM will send a secret request containing the
+/// family id and imaged id as well as the HMAC algorithm and the HMAC over these parameters.
+fn secret(stream: &mut UnixStream, http: &Client) -> anyhow::Result<()> {
+    let request: SecretRequest = {
+        let payload = proxy_read(stream)?;
+        serde_json::from_slice(&payload)
+            .context("unable to deserialize secret request from JSON")?
+    };
+
+    let response = {
+        let backend = BACKEND.lock().unwrap();
+
+        backend.clone().unwrap().secret(http, request)
+    }?;
+
     proxy_write(stream, response)?;
 
     Ok(())

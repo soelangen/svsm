@@ -2012,6 +2012,7 @@ dependencies = [
  "elf",
  "gdbstub",
  "gdbstub_arch",
+ "hmac",
  "igvm_defs",
  "intrusive-collections",
  "kbs-types",

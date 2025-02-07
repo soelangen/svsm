@@ -219,7 +219,7 @@ impl VtpmInterface for TcgTpm<'_> {
         {
             self.attestation_driver =
                 Option::from(AttestationDriver::try_from(kbs_types::Tee::Snp)?);
-            let secret = self.attestation_driver.as_mut().unwrap().attest().unwrap();
+            let secret = self.attestation_driver.as_mut().unwrap().get_secret()?;
             nv_state = Some(secret);
             self.state_len = nv_state.as_ref().unwrap().len();
         }
