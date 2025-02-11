@@ -222,6 +222,12 @@ impl VtpmInterface for TcgTpm<'_> {
             let secret = self.attestation_driver.as_mut().unwrap().get_secret()?;
             nv_state = Some(secret);
             self.state_len = nv_state.as_ref().unwrap().len();
+            if self.state_len == 0 {
+                // We indicate that nv_state needs to be manufactured
+                nv_state = None;
+                // We set the state to the currently maximum defined NV memory
+                self.state_len = 16384;
+            }
         }
 
         unsafe { _plat__NVEnable(VirtAddr::null().as_mut_ptr::<c_void>(), 0) };
