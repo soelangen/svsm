@@ -102,6 +102,7 @@ impl AttestationProtocol for KbsProtocol {
                 success: false,
                 secret: None,
                 pub_key: None,
+                nonce: None,
             });
         }
 
@@ -119,6 +120,7 @@ impl AttestationProtocol for KbsProtocol {
                 success: false,
                 secret: None,
                 pub_key: None,
+                nonce: None,
             });
         }
 
@@ -156,6 +158,7 @@ impl AttestationProtocol for KbsProtocol {
             success: true,
             secret: Some(resp.ciphertext),
             pub_key: Some(pub_key),
+            nonce: Some(resp.iv),
         })
     }
 }

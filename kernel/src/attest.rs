@@ -13,8 +13,10 @@ use crate::{
     io::{Read, Write, DEFAULT_IO_DRIVER},
     serial::SerialPort,
 };
-use aes::{cipher::BlockDecrypt, Aes256};
-use aes_gcm::KeyInit;
+use aes_gcm_siv::{
+    aead::{Aead, KeyInit},
+    Aes256GcmSiv, Nonce,
+};
 use alloc::{string::ToString, vec, vec::Vec};
 use base64::{prelude::*, Engine};
 use cocoon_tpm_crypto::{
@@ -27,7 +29,6 @@ use cocoon_tpm_utils_common::{
     alloc::try_alloc_zeroizing_vec,
     io_slices::{self, IoSlicesIterCommon as _},
 };
-use core::cmp::min;
 use kbs_types::Tee;
 use libaproxy::*;
 use serde::Serialize;
@@ -133,35 +134,33 @@ impl AttestationDriver<'_> {
             return Err(AttestationError::SecretMissing);
         };
 
-        self.decrypt(ciphertext, pub_key)
+        let Some(nonce) = response.nonce else {
+            return Err(AttestationError::SecretMissing);
+        };
+
+        self.decrypt(ciphertext, nonce, pub_key)
     }
 
     /// Decrypt a secret from the attestation server with the TEE private key.
     fn decrypt(
         &self,
         ciphertext: Vec<u8>,
+        nonce: Vec<u8>,
         pub_key: TpmsEccPoint<'static>,
     ) -> Result<Vec<u8>, AttestationError> {
         let shared_secret =
             ecdh_c_1e_1s_cdh_party_v_key_gen(TpmiAlgHash::Sha256, "", &self.ecc, &pub_key)
                 .map_err(AttestationError::Crypto)?;
 
-        let aes = Aes256::new_from_slice(&shared_secret[..])
-            .map_err(|_| AttestationError::AesGenerate)?;
-        // Decrypt each 16-byte block of the ciphertext with the symmetric key.
-        let mut ptr = 0;
-        let len = ciphertext.len();
-        let mut vec: Vec<u8> = Vec::new();
-        while ptr < len {
-            let remain = min(16, len - ptr);
-            let mut arr: [u8; 16] = [0u8; 16];
-            arr[..remain].copy_from_slice(&ciphertext[ptr..ptr + remain]);
-            aes.decrypt_block((&mut arr).into());
-            vec.append(&mut arr.to_vec());
-            ptr += remain;
-        }
+        let aes = Aes256GcmSiv::new_from_slice(&shared_secret[..])
+            .or(Err(AttestationError::AesGenerate))?;
+        let aes_nonce = Nonce::from_slice(&nonce);
 
-        Ok(vec)
+        let decrypt = aes
+            .decrypt(aes_nonce, ciphertext.as_ref())
+            .or(Err(AttestationError::SecretDecrypt))?;
+
+        Ok(decrypt)
     }
 
     /// Read attestation data from the serial port.

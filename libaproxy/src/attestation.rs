@@ -105,4 +105,6 @@ pub struct AttestationResponse {
     pub secret: Option<Vec<u8>>,
     /// Server's public key used for symmetric encryption/decryption.
     pub pub_key: Option<AttestationKey>,
+    /// Nonce needed for AES-GCM decryption
+    pub nonce: Option<Vec<u8>>,
 }
