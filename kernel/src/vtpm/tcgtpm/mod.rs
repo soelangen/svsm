@@ -16,6 +16,8 @@ mod tss;
 
 extern crate alloc;
 
+use crate::attest::AttestationDriver;
+
 use alloc::vec::Vec;
 
 use core::ffi::c_void;
@@ -34,17 +36,19 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Default)]
-pub struct TcgTpm {
+#[allow(missing_debug_implementations)]
+pub struct TcgTpm<'a> {
     is_powered_on: bool,
     ekpub: Option<Vec<u8>>,
+    attestation_driver: Option<AttestationDriver<'a>>,
 }
 
-impl TcgTpm {
-    pub const fn new() -> TcgTpm {
+impl TcgTpm<'_> {
+    pub const fn new<'a>() -> TcgTpm<'a> {
         TcgTpm {
             is_powered_on: false,
             ekpub: None,
+            attestation_driver: None,
         }
     }
 
@@ -79,7 +83,7 @@ impl TcgTpm {
 
 const TPM_CMDS_SUPPORTED: &[TpmPlatformCommand] = &[TpmPlatformCommand::SendCommand];
 
-impl VtpmProtocolInterface for TcgTpm {
+impl VtpmProtocolInterface for TcgTpm<'_> {
     fn get_supported_commands(&self) -> &[TpmPlatformCommand] {
         TPM_CMDS_SUPPORTED
     }
@@ -87,7 +91,7 @@ impl VtpmProtocolInterface for TcgTpm {
 
 pub const TPM_BUFFER_MAX_SIZE: usize = PAGE_SIZE;
 
-impl TcgTpmSimulatorInterface for TcgTpm {
+impl TcgTpmSimulatorInterface for TcgTpm<'_> {
     fn send_tpm_command(&self, command: &[u8], locality: u8) -> Result<Vec<u8>, SvsmReqError> {
         if !self.is_powered_on {
             return Err(SvsmReqError::invalid_request());
@@ -164,7 +168,7 @@ impl TcgTpmSimulatorInterface for TcgTpm {
     }
 }
 
-impl VtpmInterface for TcgTpm {
+impl VtpmInterface for TcgTpm<'_> {
     fn get_ekpub(&mut self) -> Result<Vec<u8>, SvsmReqError> {
         if self.ekpub.is_none() {
             self.ekpub = Some(tss::create_ek(self, &DEFAULT_PUBLIC_AREA[..])?);
@@ -186,6 +190,16 @@ impl VtpmInterface for TcgTpm {
         // 5. Power it on indicating it requires startup. By default, OVMF will start
         //    and selftest it.
 
+        let _nv_state;
+        #[cfg(all(feature = "attest", not(test)))]
+        {
+            self.attestation_driver =
+                Option::from(AttestationDriver::try_from(kbs_types::Tee::Snp)?);
+            let secret = self.attestation_driver.as_mut().unwrap().attest().unwrap();
+            // TODO remove for production as the secret is leaked
+            log::info!("Decrypted vTPM state from attestation server: {:?}", secret);
+            _nv_state = Some(secret);
+        }
         // SAFETY: FFI call. Parameters and return values are checked.
         let mut rc = unsafe { _plat__NVEnable(VirtAddr::null().as_mut_ptr::<c_void>(), 0) };
         if rc != 0 {
