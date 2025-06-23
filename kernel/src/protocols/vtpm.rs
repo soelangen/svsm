@@ -112,7 +112,7 @@ impl TpmSendCommandRequest {
             .get(..length)
             .ok_or_else(SvsmReqError::invalid_parameter)?;
 
-        let vtpm = vtpm_get_locked();
+        let mut vtpm = vtpm_get_locked();
         let response = vtpm.send_tpm_command(tpm_cmd, self.locality)?;
 
         Ok(response)

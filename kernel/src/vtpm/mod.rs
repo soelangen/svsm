@@ -42,7 +42,7 @@ pub trait TcgTpmSimulatorInterface: VtpmProtocolInterface {
     ///
     /// A [`Result`] containing the response received from the TPM on success,
     /// or an error.
-    fn send_tpm_command(&self, command: &[u8], locality: u8) -> Result<Vec<u8>, SvsmReqError>;
+    fn send_tpm_command(&mut self, command: &[u8], locality: u8) -> Result<Vec<u8>, SvsmReqError>;
 
     /// Power-on the TPM, which also triggers a reset
     ///

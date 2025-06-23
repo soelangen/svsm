@@ -18,13 +18,14 @@ extern crate alloc;
 
 use crate::attest::AttestationDriver;
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use core::ffi::c_void;
 use libtcgtpm::bindings::{
     TPM_Manufacture, TPM_TearDown, _plat__LocalitySet, _plat__NVDisable, _plat__NVEnable,
-    _plat__NvMemoryWrite, _plat__RunCommand, _plat__SetNvAvail, _plat__Signal_PowerOn,
-    _plat__Signal_Reset,
+    _plat__NvGetChangedStatus, _plat__NvMemoryRead, _plat__NvMemoryWrite, _plat__RunCommand,
+    _plat__SetNvAvail, _plat__Signal_PowerOn, _plat__Signal_Reset,
 };
 
 use crate::{
@@ -42,6 +43,7 @@ pub struct TcgTpm<'a> {
     is_powered_on: bool,
     ekpub: Option<Vec<u8>>,
     attestation_driver: Option<AttestationDriver<'a>>,
+    state_len: usize,
 }
 
 impl TcgTpm<'_> {
@@ -50,6 +52,7 @@ impl TcgTpm<'_> {
             is_powered_on: false,
             ekpub: None,
             attestation_driver: None,
+            state_len: 0,
         }
     }
 
@@ -93,12 +96,28 @@ impl VtpmProtocolInterface for TcgTpm<'_> {
 pub const TPM_BUFFER_MAX_SIZE: usize = PAGE_SIZE;
 
 impl TcgTpmSimulatorInterface for TcgTpm<'_> {
-    fn send_tpm_command(&self, command: &[u8], locality: u8) -> Result<Vec<u8>, SvsmReqError> {
+    fn send_tpm_command(&mut self, command: &[u8], locality: u8) -> Result<Vec<u8>, SvsmReqError> {
         if !self.is_powered_on {
             return Err(SvsmReqError::invalid_request());
         }
         if command.len() > TPM_BUFFER_MAX_SIZE {
             return Err(SvsmReqError::invalid_parameter());
+        }
+
+        let lc_state: Vec<u8> = vec![0; self.state_len];
+
+        let rc = unsafe {
+            _plat__NvMemoryRead(
+                0,
+                self.state_len.try_into().unwrap(),
+                lc_state.as_ptr() as *mut c_void,
+            )
+        };
+
+
+        if rc != 1 {
+            unsafe { _plat__NVDisable(1 as *mut c_void, 0) };
+            return Err(SvsmReqError::incomplete());
         }
 
         // _plat__RunCommand() should define it `const` because it only uses
@@ -126,6 +145,36 @@ impl TcgTpmSimulatorInterface for TcgTpm<'_> {
                 return Err(SvsmReqError::invalid_request());
             }
             response_ffi.set_len(response_ffi_size as usize);
+        }
+
+        let rc = unsafe {
+            _plat__NvGetChangedStatus(
+                0,
+                self.state_len.try_into().unwrap(),
+                lc_state.as_ptr() as *mut c_void,
+            )
+        };
+        if rc == 1 {
+            let rc = unsafe {
+                _plat__NvMemoryRead(
+                    0,
+                    self.state_len.try_into().unwrap(),
+                    lc_state.as_ptr() as *mut c_void,
+                )
+            };
+            if rc != 1 {
+                unsafe { _plat__NVDisable(1 as *mut c_void, 0) };
+                return Err(SvsmReqError::incomplete());
+            }
+            self.attestation_driver
+                .as_mut()
+                .unwrap()
+                .syncback(lc_state)?;
+        } else if rc == 0 {
+            //Nothing has to be done as NV has not changed
+        } else {
+            unsafe { _plat__NVDisable(1 as *mut c_void, 0) };
+            return Err(SvsmReqError::incomplete());
         }
 
         Ok(response_ffi)
@@ -200,10 +249,13 @@ impl VtpmInterface for TcgTpm<'_> {
             // TODO remove for production as the secret is leaked
             log::info!("Decrypted vTPM state from attestation server: {:?}", secret);
             _nv_state = Some(secret);
+            self.state_len = _nv_state.as_ref().unwrap().len();
 
-            if _nv_state.as_ref().unwrap().len() == 0 {
+            if self.state_len == 0 {
                 // The received vTPM state was empty, indicate tha manufacturing is needed
                 _nv_state = None;
+                 // We set the state to the currently maximum defined NV memory
+                self.state_len = 16384;
             }
         }
 

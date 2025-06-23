@@ -98,7 +98,7 @@ fn create_mtauth_ek_cmd(tpmt_public: &[u8]) -> Vec<u8> {
 ///
 /// The command response on success, or an error.
 pub fn checked_send<T: TcgTpmSimulatorInterface>(
-    vtpm: &T,
+    vtpm: &mut T,
     cmd: &mut [u8],
     set_len: bool,
 ) -> Result<Vec<u8>, SvsmVTpmError> {
@@ -132,7 +132,7 @@ pub fn checked_send<T: TcgTpmSimulatorInterface>(
 ///
 /// A TPMT_PUBLIC of the key created from the template.
 pub fn create_ek<T: TcgTpmSimulatorInterface>(
-    vtpm: &T,
+    vtpm: &mut T,
     tpmt_public: &[u8],
 ) -> Result<Vec<u8>, SvsmVTpmError> {
     let mut cmd = create_mtauth_ek_cmd(tpmt_public);
