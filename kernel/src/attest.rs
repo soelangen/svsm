@@ -28,6 +28,7 @@ use cocoon_tpm_tpm2_interface::{self as tpm2_interface, TpmEccCurve, TpmiAlgHash
 use cocoon_tpm_utils_common::{
     alloc::try_alloc_zeroizing_vec,
     io_slices::{self, IoSlicesIterCommon as _},
+    zeroize::Zeroizing,
 };
 use kbs_types::Tee;
 use libaproxy::*;
@@ -43,6 +44,7 @@ pub struct AttestationDriver<'a> {
     tee: Tee,
     ecc: EccKey,
     curve: Curve,
+    aes_key: Option<Vec<u8>>,
 }
 
 impl TryFrom<Tee> for AttestationDriver<'_> {
@@ -67,6 +69,7 @@ impl TryFrom<Tee> for AttestationDriver<'_> {
             tee,
             ecc,
             curve,
+            aes_key: None,
         })
     }
 }
@@ -78,6 +81,10 @@ impl AttestationDriver<'_> {
 
         self.attestation(negotiation)
             .map_err(SvsmError::TeeAttestation)
+    }
+
+    pub fn syncback(&mut self, secret: Vec<u8>) -> Result<SyncBackResponse, SvsmError> {
+        Ok(self.sync(secret)?)
     }
 
     /// Send a negotiation request to the proxy. Proxy should reply with Negotiation parameters
@@ -141,9 +148,20 @@ impl AttestationDriver<'_> {
         self.decrypt(ciphertext, nonce, pub_key)
     }
 
+    fn sync(&mut self, secret: Vec<u8>) -> Result<SyncBackResponse, AttestationError> {
+        let (nonce, secret) = self.encrypt(secret)?;
+
+        let request = SyncBackRequest { nonce, secret };
+
+        self.write(request)?;
+        let payload = self.read()?;
+
+        serde_json::from_slice(&payload).or(Err(AttestationError::SyncBackRespDeserialize))
+    }
+
     /// Decrypt a secret from the attestation server with the TEE private key.
     fn decrypt(
-        &self,
+        &mut self,
         ciphertext: Vec<u8>,
         nonce: Vec<u8>,
         pub_key: TpmsEccPoint<'static>,
@@ -151,6 +169,8 @@ impl AttestationDriver<'_> {
         let shared_secret =
             ecdh_c_1e_1s_cdh_party_v_key_gen(TpmiAlgHash::Sha256, "", &self.ecc, &pub_key)
                 .map_err(AttestationError::Crypto)?;
+
+        self.aes_key = Some(shared_secret[..].to_vec());
 
         let aes = Aes256GcmSiv::new_from_slice(&shared_secret[..])
             .or(Err(AttestationError::AesGenerate))?;
@@ -161,6 +181,17 @@ impl AttestationDriver<'_> {
             .or(Err(AttestationError::SecretDecrypt))?;
 
         Ok(decrypt)
+    }
+
+    fn encrypt(&mut self, secret: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>), AttestationError> {
+        let rand = aes_nonce_generate().map_err(AttestationError::Crypto)?;
+
+        let cipher = Aes256GcmSiv::new_from_slice(self.aes_key.as_ref().unwrap());
+        let nonce = Nonce::from_slice(&rand);
+
+        let encrypted_secret = cipher.unwrap().encrypt(nonce, secret.as_slice()).unwrap();
+
+        Ok((Vec::from(nonce.as_bytes()), encrypted_secret))
     }
 
     /// Read attestation data from the serial port.
@@ -228,6 +259,8 @@ pub enum AttestationError {
     SecretMissing,
     /// Unable to fetch SEV-SNP attestation report.
     SnpGetReport,
+    /// Error deserializing the syncback response from JSON bytes.
+    SyncBackRespDeserialize,
 }
 
 impl From<AttestationError> for SvsmError {
@@ -261,6 +294,18 @@ fn sc_key_generate(curve: &Curve) -> Result<EccKey, CryptoError> {
     let curve_ops = curve.curve_ops()?;
 
     EccKey::generate(&curve_ops, &mut rng, None)
+}
+
+fn aes_nonce_generate() -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    let mut rdseed = X86RdSeedRng::instantiate().map_err(|_| CryptoError::RngFailure)?;
+    let mut hash_drbg_entropy = try_alloc_zeroizing_vec(12)?;
+
+    rdseed.generate::<_, EmptyCryptoIoSlices>(
+        io_slices::SingletonIoSliceMut::new(hash_drbg_entropy.as_mut_slice()).map_infallible_err(),
+        None,
+    )?;
+
+    Ok(hash_drbg_entropy)
 }
 
 /// Hash negotiation parameters and fetch TEE evidence.
