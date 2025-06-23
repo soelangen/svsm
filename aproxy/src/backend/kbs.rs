@@ -6,13 +6,25 @@
 // Author: Tyler Fanelli <tfanelli@redhat.com>
 
 use super::*;
-use anyhow::Context;
+use anyhow::{Context, Ok};
 use kbs_types::*;
 use reqwest::StatusCode;
+use serde::{Serialize, Deserialize};
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct KbsProtocol;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SyncRequest {
+    pub nonce: Vec<u8>,
+    pub secret: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SyncResponse {
+    pub success: bool,
+}
 
 impl AttestationProtocol for KbsProtocol {
     /// KBS servers usually want two components hashed into attestation evidence: the public
@@ -159,6 +171,35 @@ impl AttestationProtocol for KbsProtocol {
             secret: Some(resp.ciphertext),
             pub_key: Some(pub_key),
             nonce: Some(resp.iv),
+        })
+    }
+
+    fn syncback(
+        &mut self,
+        http: &mut HttpClient,
+        req: SyncBackRequest,
+    ) -> anyhow::Result<SyncBackResponse> {
+        let req = SyncRequest {
+            nonce: req.nonce,
+            secret: req.secret,
+        };
+
+        let http_resp = http
+            .cli
+            .post(format!("{}/kbs/v0/syncback", http.url))
+            .json(&req)
+            .send()
+            .context("unable to POST to KBS /syncback endpoint")?;
+
+        let text = http_resp
+            .text()
+            .context("unable to convert KBS /syncback response to text")?;
+
+        let resp: SyncResponse = serde_json::from_str(&text)
+            .context("unable to convert KBS /syncback response to JSON")?;
+
+        Ok(SyncBackResponse {
+            success: resp.success,
         })
     }
 }

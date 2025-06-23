@@ -18,6 +18,7 @@ use std::{
 pub fn attest(stream: &mut UnixStream, http: &mut backend::HttpClient) -> anyhow::Result<()> {
     negotiation(stream, http)?;
     attestation(stream, http)?;
+    syncback(stream, http)?;
 
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf)?;
@@ -64,6 +65,25 @@ fn attestation(stream: &mut UnixStream, http: &mut backend::HttpClient) -> anyho
     // Write the response from the attestation server to SVSM.
     proxy_write(stream, response)?;
 
+    Ok(())
+}
+
+fn syncback(stream: &mut UnixStream, http: &mut backend::HttpClient) -> anyhow::Result<()> {
+    loop {
+        let request: SyncBackRequest = {
+            let payload = match proxy_read(stream) {
+                Ok(payload) => payload,
+                Err(_e) => break,
+            };
+            serde_json::from_slice(&payload)
+                .context("unable to deserialize attestation request from JSON")?
+        };
+
+        let response = http.syncback(request)?;
+
+        // Write the response from the attestation server to SVSM.
+        proxy_write(stream, response)?;
+    }
     Ok(())
 }
 

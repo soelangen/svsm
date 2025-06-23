@@ -44,6 +44,12 @@ impl HttpClient {
             Protocol::Kbs(mut kbs) => kbs.attestation(self, req),
         }
     }
+
+    pub fn syncback(&mut self, req: SyncBackRequest) -> anyhow::Result<SyncBackResponse> {
+        match self.protocol {
+            Protocol::Kbs(mut kbs) => kbs.syncback(self, req),
+        }
+    }
 }
 
 /// Attestation Protocol identifier.
@@ -76,4 +82,9 @@ pub trait AttestationProtocol {
         client: &mut HttpClient,
         req: AttestationRequest,
     ) -> anyhow::Result<AttestationResponse>;
+    fn syncback(
+        &mut self,
+        client: &mut HttpClient,
+        req: SyncBackRequest,
+    ) -> anyhow::Result<SyncBackResponse>;
 }
