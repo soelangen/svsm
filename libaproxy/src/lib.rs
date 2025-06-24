@@ -9,8 +9,10 @@
 
 mod attestation;
 mod negotiation;
+mod secret;
 mod syncback;
 
 pub use attestation::*;
 pub use negotiation::*;
+pub use secret::*;
 pub use syncback::*;

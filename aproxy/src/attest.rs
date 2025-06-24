@@ -18,6 +18,7 @@ use std::{
 pub fn attest(stream: &mut UnixStream, http: &mut backend::HttpClient) -> anyhow::Result<()> {
     negotiation(stream, http)?;
     attestation(stream, http)?;
+    secret(stream, http)?;
     syncback(stream, http)?;
 
     let mut buf = Vec::new();
@@ -61,6 +62,21 @@ fn attestation(stream: &mut UnixStream, http: &mut backend::HttpClient) -> anyho
 
     // Attest the TEE evidence with the server.
     let response = http.attestation(request)?;
+
+    // Write the response from the attestation server to SVSM.
+    proxy_write(stream, response)?;
+
+    Ok(())
+}
+
+fn secret(stream: &mut UnixStream, http: &mut backend::HttpClient) -> anyhow::Result<()> {
+    let request: SecretRequest = {
+        let payload = proxy_read(stream)?;
+        serde_json::from_slice(&payload)
+            .context("unable to deserialize secret request from JSON")?
+    };
+
+    let response = http.secret(request)?;
 
     // Write the response from the attestation server to SVSM.
     proxy_write(stream, response)?;

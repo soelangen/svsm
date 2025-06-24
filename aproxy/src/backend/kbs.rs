@@ -9,7 +9,7 @@ use super::*;
 use anyhow::{Context, Ok};
 use kbs_types::*;
 use reqwest::StatusCode;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -19,11 +19,26 @@ pub struct KbsProtocol;
 pub struct SyncRequest {
     pub nonce: Vec<u8>,
     pub secret: Vec<u8>,
+    pub family_id: [u8; 16],
+    pub image_id: [u8; 16],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SyncResponse {
     pub success: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AttestResponse {
+    pub pub_key: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SecretReceiveRequest {
+    pub family_id: [u8; 16],
+    pub image_id: [u8; 16],
+    pub algorithm: ResourceRequestHMAC,
+    pub mac: Vec<u8>,
 }
 
 impl AttestationProtocol for KbsProtocol {
@@ -110,41 +125,17 @@ impl AttestationProtocol for KbsProtocol {
         //
         // FIXME
         if http_resp.status() != StatusCode::OK {
-            return Ok(AttestationResponse {
-                success: false,
-                secret: None,
-                pub_key: None,
-                nonce: None,
-            });
-        }
+            return Ok(AttestationResponse { pub_key: None });
+        } else {
+            let text = http_resp
+                .text()
+                .context("unable to read KBS /resource response")?;
 
-        // Successful attestation. Fetch the secret (which should be stored as "svsm_secret" within
-        // the KBS's RVPS.
-        let http_resp = http
-            .cli
-            .post(format!("{}/kbs/v0/svsm_secret", http.url))
-            .send()
-            .context("unable to POST to KBS /attest endpoint")?;
+            let resp: AttestResponse = serde_json::from_str(&text)
+                .context("unable to convert KBS /resource response to KBS Response object")?;
 
-        // Unsuccessful attempt at retrieving secret.
-        if http_resp.status() != StatusCode::OK {
-            return Ok(AttestationResponse {
-                success: false,
-                secret: None,
-                pub_key: None,
-                nonce: None,
-            });
-        }
-
-        let text = http_resp
-            .text()
-            .context("unable to read KBS /resource response")?;
-
-        let resp: Response = serde_json::from_str(&text)
-            .context("unable to convert KBS /resource response to KBS Response object")?;
-
-        let pub_key = {
-            let val = serde_json::from_slice(&resp.encrypted_key).unwrap();
+            let pub_key = {
+            let val = serde_json::from_slice(&resp.pub_key.unwrap()).unwrap();
             let Value::Object(map) = val else {
                 panic!();
             };
@@ -166,11 +157,52 @@ impl AttestationProtocol for KbsProtocol {
             }
         };
 
-        Ok(AttestationResponse {
+            Ok(AttestationResponse {
+                pub_key: Some(pub_key),
+            })
+        }
+    }
+
+    fn secret(
+        &mut self,
+        http: &mut HttpClient,
+        request: SecretRequest,
+    ) -> anyhow::Result<SecretResponse> {
+        let resource = SecretReceiveRequest {
+            family_id: request.family_id,
+            image_id: request.image_id,
+            algorithm: request.algorithm,
+            mac: request.mac,
+        };
+
+        // Fetch the secret (which should be stored as "svsm_secret" within the KBS's RVPS.
+        let http_resp = http
+            .cli
+            .post(format!("{}/kbs/v0/svsm_secret", http.url))
+            .json(&resource)
+            .send()
+            .context("unable to POST to KBS /attest endpoint")?;
+
+        // Unsuccessful attempt at retrieving secret.
+        if http_resp.status() != StatusCode::OK {
+            return Ok(SecretResponse {
+                nonce: None,
+                success: false,
+                secret: None,
+            });
+        }
+
+        let text = http_resp
+            .text()
+            .context("unable to read KBS /resource response")?;
+
+        let resp: Response = serde_json::from_str(&text)
+            .context("unable to convert KBS /resource response to KBS Response object")?;
+
+        Ok(SecretResponse {
+            nonce: Some(resp.iv),
             success: true,
             secret: Some(resp.ciphertext),
-            pub_key: Some(pub_key),
-            nonce: Some(resp.iv),
         })
     }
 
@@ -182,6 +214,8 @@ impl AttestationProtocol for KbsProtocol {
         let req = SyncRequest {
             nonce: req.nonce,
             secret: req.secret,
+            family_id: req.family_id,
+            image_id: req.image_id,
         };
 
         let http_resp = http

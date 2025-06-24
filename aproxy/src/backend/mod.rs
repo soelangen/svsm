@@ -45,6 +45,12 @@ impl HttpClient {
         }
     }
 
+    pub fn secret(&mut self, req: SecretRequest) -> anyhow::Result<SecretResponse> {
+        match self.protocol {
+            Protocol::Kbs(mut kbs) => kbs.secret(self, req),
+        }
+    }
+
     pub fn syncback(&mut self, req: SyncBackRequest) -> anyhow::Result<SyncBackResponse> {
         match self.protocol {
             Protocol::Kbs(mut kbs) => kbs.syncback(self, req),
@@ -82,6 +88,11 @@ pub trait AttestationProtocol {
         client: &mut HttpClient,
         req: AttestationRequest,
     ) -> anyhow::Result<AttestationResponse>;
+    fn secret(
+        &mut self,
+        client: &mut HttpClient,
+        req: SecretRequest,
+    ) -> anyhow::Result<SecretResponse>;
     fn syncback(
         &mut self,
         client: &mut HttpClient,
