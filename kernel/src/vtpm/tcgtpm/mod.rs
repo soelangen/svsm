@@ -114,7 +114,6 @@ impl TcgTpmSimulatorInterface for TcgTpm<'_> {
             )
         };
 
-
         if rc != 1 {
             unsafe { _plat__NVDisable(1 as *mut c_void, 0) };
             return Err(SvsmReqError::incomplete());
@@ -245,7 +244,7 @@ impl VtpmInterface for TcgTpm<'_> {
         {
             self.attestation_driver =
                 Option::from(AttestationDriver::try_from(kbs_types::Tee::Snp)?);
-            let secret = self.attestation_driver.as_mut().unwrap().attest().unwrap();
+            let secret = self.attestation_driver.as_mut().unwrap().get_secret()?;
             // TODO remove for production as the secret is leaked
             log::info!("Decrypted vTPM state from attestation server: {:?}", secret);
             _nv_state = Some(secret);
@@ -254,7 +253,7 @@ impl VtpmInterface for TcgTpm<'_> {
             if self.state_len == 0 {
                 // The received vTPM state was empty, indicate tha manufacturing is needed
                 _nv_state = None;
-                 // We set the state to the currently maximum defined NV memory
+                // We set the state to the currently maximum defined NV memory
                 self.state_len = 16384;
             }
         }
